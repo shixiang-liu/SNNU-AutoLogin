@@ -4,9 +4,14 @@ import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import static io.github.shixiangliu.snnulogin.PortalProtocol.*;
 
@@ -100,6 +105,11 @@ public final class PortalClient {
         if (session != null) return new Status(Kind.ONLINE, session, endpoint);
         return loginForm(html) ? new Status(Kind.OFFLINE, null, endpoint) : Status.unreachable();
     }
+    /** Shared pool for the portal port scan; daemon threads never outlive the process. */
+    private static final ExecutorService SCANNER = Executors.newFixedThreadPool(
+        Math.min(4, PORTS.length), job -> {
+            Thread thread = new Thread(job, "portal-scan"); thread.setDaemon(true); return thread;
+        });
     public Status status(Endpoint cached) throws IOException {
         Status offline = null;
         if (cached != null) {
@@ -121,14 +131,28 @@ public final class PortalClient {
                 }
             } catch (IOException ex) { check(); }
         }
+        // Serial probing of 11 ports can hold the single worker for seconds when the
+        // portal is unreachable; scan them concurrently under one deadline instead.
         String host = cached == null ? HOST : cached.host;
+        List<Future<Status>> futures = new ArrayList<>();
         for (int port : PORTS) {
+            final int candidate = port;
+            futures.add(SCANNER.submit(() -> {
+                try { return statusAt(new Endpoint(host, candidate), 450); }
+                catch (IOException ex) { check(); return null; }
+            }));
+        }
+        long deadlineNanos = System.nanoTime() + 1_500_000_000L;
+        for (Future<Status> future : futures) {
             check();
+            long leftMillis = (deadlineNanos - System.nanoTime()) / 1_000_000L;
+            Status result;
             try {
-                Status result = statusAt(new Endpoint(host, port), 450);
-                if (result.kind == Kind.ONLINE) return result;
-                if (result.kind == Kind.OFFLINE && offline == null) offline = result;
-            } catch (IOException ex) { check(); }
+                result = leftMillis > 0 ? future.get(leftMillis, TimeUnit.MILLISECONDS) : null;
+            } catch (Exception ex) { result = null; }
+            if (result == null) continue;
+            if (result.kind == Kind.ONLINE) return result;
+            if (result.kind == Kind.OFFLINE && offline == null) offline = result;
         }
         return offline == null ? Status.unreachable() : offline;
     }

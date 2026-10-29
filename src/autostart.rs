@@ -55,20 +55,19 @@ pub fn disable() {
 
 pub fn enabled() -> bool {
     if let Some(h) = open(KEY_QUERY_VALUE.0) {
-        let mut buf = [0u8; 1024];
-        let mut len = buf.len() as u32;
+        // 只查询值是否存在：命令路径可能很长，固定缓冲会因 ERROR_MORE_DATA 误报未启用。
         let rc = unsafe {
             windows::Win32::System::Registry::RegQueryValueExW(
                 h,
                 PCWSTR(wide(VALUE).as_ptr()),
                 None,
                 None,
-                Some(buf.as_mut_ptr()),
-                Some(&mut len),
+                None,
+                None,
             )
         };
         let _ = unsafe { RegCloseKey(h) };
-        return rc == ERROR_SUCCESS && len > 2;
+        return rc == ERROR_SUCCESS;
     }
     false
 }

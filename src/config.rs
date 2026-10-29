@@ -218,8 +218,26 @@ pub fn try_update_state(f: impl FnOnce(&mut State)) -> std::io::Result<()> {
 fn update_state_at(path: &Path, f: impl FnOnce(&mut State)) -> std::io::Result<()> {
     let _lock = crate::process_lock::ProcessLock::acquire(path, Duration::from_secs(5))?;
     let mut s = match fs::read_to_string(path) {
-        Ok(raw) => serde_json::from_str(&raw)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+        Ok(raw) => match serde_json::from_str(&raw) {
+            Ok(s) => s,
+            Err(e) => {
+                // 损坏的状态文件不能无限期阻塞状态更新：先备份原始内容再重建。
+                let backup = path.with_file_name(format!(
+                    "{}.corrupt-{}",
+                    path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("state"),
+                    stamp_compact()
+                ));
+                let _ = fs::rename(path, &backup);
+                logf(&format!(
+                    "状态文件损坏，已备份为 {}：{}",
+                    backup.display(),
+                    e
+                ));
+                State::default()
+            }
+        },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => State::default(),
         Err(e) => return Err(e),
     };
@@ -373,12 +391,22 @@ mod tests {
     }
 
     #[test]
-    fn damaged_state_is_not_overwritten_with_defaults() {
+    fn damaged_state_is_backed_up_and_rebuilt() {
         let path = sandbox();
         fs::write(&path, "broken JSON").unwrap();
-        assert!(update_state_at(&path, |s| s.net_bad = 9).is_err());
-        assert_eq!(fs::read_to_string(&path).unwrap(), "broken JSON");
+        assert!(update_state_at(&path, |s| s.net_bad = 9).is_ok());
+        // 状态重建后可正常更新。
+        let rebuilt: State = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(rebuilt.net_bad, 9);
+        // 原始损坏内容被保留在备份文件里，便于排查。
+        let backup = fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(Result::ok)
+            .find(|e| e.file_name().to_string_lossy().contains("corrupt"))
+            .expect("损坏文件应被备份");
+        assert_eq!(fs::read_to_string(backup.path()).unwrap(), "broken JSON");
         fs::remove_file(&path).unwrap();
+        fs::remove_file(backup.path()).unwrap();
         #[cfg(target_os = "macos")]
         fs::remove_file(path.with_extension("lock")).unwrap();
         fs::remove_dir(path.parent().unwrap()).unwrap();

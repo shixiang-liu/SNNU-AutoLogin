@@ -14,7 +14,10 @@ pub fn ctl_port() -> u16 {
     if s.ctl_port > 0 {
         return s.ctl_port;
     }
-    let user = std::env::var("USERNAME").unwrap_or_else(|_| "user".into());
+    // Windows 用 USERNAME，macOS 用 USER；缺省值保持一致以便多用户区分。
+    let user = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "user".into());
     let sum: u32 = user.bytes().map(|b| b as u32).sum();
     49721 + (sum % 400) as u16
 }
@@ -349,7 +352,15 @@ pub fn run_daemon() {
                     if let (true, Some(port)) = (repair, repair_port) {
                         crate::config::logf("检测到假在线，下线重登");
                         crate::tray::connecting("网络暂不可用", "正在尝试恢复连接");
-                        let _ = portal::logout(port);
+                        if !portal::logout(port) {
+                            // 下线请求没送达时会话仍在线，login_automatic 会直接返回成功，
+                            // 导致假在线未修复却白等 20 分钟冷却。回滚冷却并稍后重试。
+                            crate::config::logf("下线失败，跳过本次修复");
+                            let _ = crate::config::try_update_state(|s| s.last_fix_ts = 0.0);
+                            sleep(30, &quit, &wake);
+                            continue;
+                        }
+                        crate::config::logf("已下线，重新登录");
                         std::thread::sleep(Duration::from_secs(1));
                         if !quit.load(Ordering::SeqCst) {
                             match portal::login_automatic(

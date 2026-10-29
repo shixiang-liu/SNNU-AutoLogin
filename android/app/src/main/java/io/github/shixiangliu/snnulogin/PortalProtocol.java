@@ -135,16 +135,21 @@ public final class PortalProtocol {
         text = text.replaceAll("(?s)代\\s*拨\\s*[：:]\\s*联\\s*通.*", "").trim();
         String[] credentials = {"密码错误", "密码输入错误", "密码不正确", "密码有误", "密码无效", "密码不匹配", "密码验证失败", "账号密码有误", "账号或密码", "用户名或密码", "账号不存在", "用户不存在", "未开通", "停机", "欠费", "余额不足", "绑定失败"};
         for (String sentence : text.split("[。!！;；]")) {
-            if (containsAny(sentence, credentials)) return limit(sentence.trim());
+            if (containsAny(sentence, credentials)) return limited(sentence.trim());
         }
         for (String sentence : text.split("[。!！;；]")) {
-            if (sentence.contains("验证码")) return limit(sentence.trim());
+            if (sentence.contains("验证码")) return limited(sentence.trim());
         }
         if (text.toLowerCase(Locale.ROOT).contains("captcha")) return "请输入验证码";
         for (String sentence : text.split("[。!！;；]")) {
-            if (containsAny(sentence, new String[]{"失败", "错误", "无效", "已过期", "在线数", "欠费", "锁定", "停用"})) return limit(sentence.trim());
+            if (containsAny(sentence, new String[]{"失败", "错误", "无效", "已过期", "在线数", "欠费", "锁定", "停用"})) return limited(sentence.trim());
         }
         return loginForm(html) || text.isEmpty() ? "账号或密码错误，请检查后重试" : limit(text);
+    }
+    /** 去掉表单噪声后可能为空（例如句子本身只是“账号：密码：”），空提示会误导用户，回退到通用文案。 */
+    private static String limited(String sentence) {
+        String compact = limit(sentence);
+        return compact.isEmpty() ? "账号或密码错误，请检查后重试" : compact;
     }
     private static String limit(String text) {
         String compact = text.replaceAll("(?s)(账号|号)\\s*[：:]\\s*密码\\s*[：:].*", "").trim();
