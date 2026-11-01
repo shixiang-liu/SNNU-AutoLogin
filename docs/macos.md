@@ -39,6 +39,26 @@
 | 关闭窗口 | 应用继续在菜单栏运行 |
 | 从菜单栏退出 | 退出应用，保留当前网络连接 |
 
+## Wi-Fi 自愈
+
+本身没网、校园网门户也不可达、又没连在校园网里时，应用会尝试把 Wi-Fi 连回学校网络。三个条件缺一不可：外网还能上（只是门户自己故障）时绝不动 Wi-Fi，有线在线或已经连在目标 Wi-Fi 上时也不干预。只连接系统里已经保存过的网络，不新建、不修改任何系统配置。
+
+| 配置项 | 默认值 | 说明 |
+| :--- | :--- | :--- |
+| `wifi_self_heal` | `true` | 关闭后完全不做自愈 |
+| `ssid` | `SNNU` | 自愈目标网络名称，留空按默认学校网络 |
+
+两项都在 `~/Library/Application Support/SNNU-AutoLogin/config.json` 里，与 Windows 端同一套字段名；账号保存时会一并写回。
+
+macOS 侧的实现与限制：
+
+- 有线判定读 `networksetup -listallhardwareports` 里的以太网类端口，再看该设备 `ifconfig` 的链路状态；
+- 当前网络优先读 `airport -I`；`airport` 在 macOS 14.4 起已被移除，此时回退 `networksetup -getairportnetwork`；
+- 附近网络扫描同样依赖 `airport -s`，扫描不可用时不再扫描，改用两次尝试之间至少 60 秒的冷却限频；
+- 连接使用 `networksetup -connectairport`（开放网络免密）。部分 macOS 版本没有这个子命令，此时应用只记日志、不做连接动作，绝不会退回会新建系统网络配置的 `-setairportnetwork`。
+
+以上命令都没有在开发机上真实执行过（开发机是 Windows，无法切换 Wi-Fi），macOS CI 与实机验证仍是最终依据。
+
 ## 系统权限
 
 - **本地网络**：用于访问学校认证服务器，请允许。

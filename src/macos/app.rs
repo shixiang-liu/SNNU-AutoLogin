@@ -1639,6 +1639,17 @@ pub(super) fn save_and_connect(
             } else {
                 old.keepalive_min.max(5)
             },
+            // Wi-Fi 自愈的设置随账号一起保存，与 Windows 端同一套字段
+            wifi_self_heal: if old_password.is_empty() {
+                true
+            } else {
+                old.wifi_self_heal
+            },
+            ssid: if old.ssid.trim().is_empty() {
+                crate::wifi_heal_core::DEFAULT_SSID.to_string()
+            } else {
+                old.ssid.clone()
+            },
             password_enc: String::new(),
         };
         config::save_config(&cfg, password).map_err(|e| format!("账号保存失败：{e}"))?;

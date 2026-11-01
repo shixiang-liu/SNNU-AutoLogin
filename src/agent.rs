@@ -235,8 +235,8 @@ pub fn run_daemon() {
     let mut last_wake = 0.0f64;
     let mut last_ping_ok = portal::unix_now();
     let mut reconnect_started: Option<std::time::Instant> = None;
-    #[cfg(windows)]
-    let mut wifi_heal = crate::windows_wifi::HealState::default();
+    #[cfg(any(windows, target_os = "macos"))]
+    let mut wifi_heal = crate::wifi_heal_core::HealState::default();
     while !quit.load(Ordering::SeqCst) {
         if wake.swap(false, Ordering::SeqCst) {
             last_wake = portal::unix_now();
@@ -288,8 +288,9 @@ pub fn run_daemon() {
                 crate::tray::set_link(crate::tray::Link::Waiting);
                 // 本身没网、门户也不可达、又不在校园网里时，才把 Wi-Fi 连回学校网络
                 // （只连系统已保存的配置；有线在线或已连学校 Wi-Fi 都不干预）
-                #[cfg(windows)]
-                crate::windows_wifi::heal_on_unreachable(&cfg, &mut wifi_heal, &quit, &wake);
+                // 唤醒（macOS 走 NSWorkspaceDidWakeNotification）与定时轮询都回到这个分支
+                #[cfg(any(windows, target_os = "macos"))]
+                crate::wifi_heal_core::heal_on_unreachable(&cfg, &mut wifi_heal, &quit, &wake);
                 // 刚唤醒时网卡可能还没就绪，密集重试几次
                 sleep(if just_woke { 1 } else { 8 }, &quit, &wake)
             }
@@ -694,7 +695,8 @@ pub fn spawn_daemon() {
 fn claim_daemon_instance() -> bool {
     true
 }
+// 与 Windows 侧同名函数同样对 crate 可见：共享自愈挂点要在复检之间等待
 #[cfg(target_os = "macos")]
-fn sleep(secs: u64, quit: &Arc<AtomicBool>, wake: &Arc<AtomicBool>) {
+pub(crate) fn sleep(secs: u64, quit: &Arc<AtomicBool>, wake: &Arc<AtomicBool>) {
     crate::macos::runtime::wait(Duration::from_secs(secs), quit, wake);
 }

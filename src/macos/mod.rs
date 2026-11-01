@@ -4,6 +4,7 @@ pub mod appearance;
 pub mod runtime;
 pub mod storage;
 pub mod validation;
+pub mod wifi_heal;
 
 /// macOS releases have their own version, independent of the Windows package.
 pub const VERSION: &str = "1.0.0";

@@ -15,6 +15,7 @@ mod process_lock;
 mod tray;
 mod tray_model;
 mod ui_model;
+mod wifi_heal_core;
 #[cfg(windows)]
 mod win32_main;
 #[cfg(windows)]
