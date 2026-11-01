@@ -66,10 +66,6 @@ public final class LoginService extends Service {
     private int failures, badInternet;
     private boolean selfLogin;
     private long lastInternetCheck;
-    /** Wi-Fi 自愈的系统调用入口，以及连接动作冷却与「同一结论只记一次日志」的状态。 */
-    private WifiHealer healer;
-    private long lastHealAttempt;
-    private String lastHealNote = "";
 
     public static boolean running() { return instance != null; }
     static void setVisible(boolean visible) {
@@ -126,7 +122,6 @@ public final class LoginService extends Service {
         StatusInspector.cancelActive();
         store = Store.get(this);
         connectivity = getSystemService(ConnectivityManager.class);
-        healer = new WifiHealer(this);
         worker.setRemoveOnCancelPolicy(true);
         worker.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
         instance = this;
@@ -304,9 +299,6 @@ public final class LoginService extends Service {
                 historyNetwork = null; selfLogin = false; badInternet = 0;
                 main.post(() -> { if (gate.valid(token)) networkChanged(null); });
                 publish(token, PortalClient.Status.unreachable(), "等待校园网", "请先连接学校 Wi-Fi", false, false);
-                // 没有任何无线关联时也要判一次自愈：连接的网络不可用（没有出口）就该尝试连回，
-                // 而手机自己在用流量时必须原地不动。判断在 WifiSelfHeal.decide 的无 Wi-Fi 分支里。
-                healWifi(token, null);
                 later(token, 60);
                 return;
             }
@@ -340,7 +332,6 @@ public final class LoginService extends Service {
                 // Retry soon: an unreachable portal is usually a captive-portal hiccup, not a reason to wait a minute.
                 publish(token, status, "等待校园网", "暂未检测到学校认证门户，正在自动重试", false, false);
                 delay = 20;
-                healWifi(token, client);
             } else if (DISCONNECT.equals(action)) {
                 status = client.logout(status.endpoint, account.name, account.operator);
                 observed = status;
@@ -444,77 +435,6 @@ public final class LoginService extends Service {
         later(token, delay);
     }
     private void safeLog(long token, String message) { gate.runIfCurrent(token, () -> store.log(message)); }
-    /**
-     * Wi-Fi 自愈挂点，两个入口共用：门户不可达分支（位置同 Windows 版 heal_on_unreachable()），
-     * 以及完全没有无线关联的分支（此时 client 为 null）。
-     * 有无线关联时：「外网不可达 + 门户不可达 + 没连在学校无线网上」三条同时成立才请求连回；
-     * 没有无线关联时：手机自己的出口可用就不动作，连出口都没有才请求连回学校网络。
-     * 决策在 WifiSelfHeal（纯逻辑，离线可测），这里只做探测接线、冷却与日志。
-     */
-    private void healWifi(long token, PortalClient client) {
-        long now = System.currentTimeMillis();
-        // client 只在有无线关联时存在：没有 Wi-Fi 就没有可探测的无线出口，
-        // 外网与门户两条供应商都不会被调用（WifiSelfHeal 的无 Wi-Fi 分支先返回）。
-        final boolean onWifi = client != null;
-        WifiSelfHeal.Plan plan = WifiSelfHeal.decide(store.automatic(),
-            () -> onWifi,
-            () -> onWifi && internetReachable(client),
-            () -> false, // 有无线关联时已经站在门户不可达这个分支里
-            () -> WifiSelfHeal.matchesSsid(healer.currentSsid(), WifiSelfHeal.DEFAULT_SSID),
-            this::otherNetworkUp);
-        if (!gate.valid(token)) return;
-        if (!plan.connects()) {
-            if (plan.skip == WifiSelfHeal.Skip.INTERNET_UP) healNote(token, "外网可通、门户不可达，不切换 Wi-Fi");
-            else if (plan.skip == WifiSelfHeal.Skip.ON_TARGET_SSID) healNote(token, "已经连在学校 Wi-Fi 上，无需自愈");
-            else if (plan.skip == WifiSelfHeal.Skip.MOBILE_NETWORK) healNote(token, "没有连学校 Wi-Fi，但手机自己有网，不切换 Wi-Fi");
-            return;
-        }
-        if (WifiSelfHeal.cooling(now, lastHealAttempt)) return;
-        lastHealAttempt = now;
-        switch (healer.connect(WifiSelfHeal.DEFAULT_SSID)) {
-            case REQUESTED:
-                healNote(token, "本身无网、门户不可达且没连 " + WifiSelfHeal.DEFAULT_SSID + "，已请求连接学校 Wi-Fi");
-                publish(token, store.snapshot.status, "等待校园网", "本身没网，已请求连接学校 Wi-Fi，请稍候", false, false);
-                break;
-            case DENIED:
-                healNote(token, "系统未允许应用连接 Wi-Fi，请检查权限后重试");
-                break;
-            case UNSUPPORTED:
-                healNote(token, "当前系统版本不支持由应用请求连接 Wi-Fi");
-                break;
-            default:
-                healNote(token, "连接 " + WifiSelfHeal.DEFAULT_SSID + " 的请求被系统拒绝，稍后重试");
-                break;
-        }
-    }
-    /**
-     * 手机自己的出口（蜂窝等）此刻是否可用：只看系统已判定的默认网络，且必须是 Wi-Fi 以外的传输方式。
-     * 没有无线关联时这条就是「用户在用流量」，此时绝不去抢 Wi-Fi。
-     */
-    private boolean otherNetworkUp() {
-        try {
-            Network active = connectivity.getActiveNetwork();
-            if (active == null) return false;
-            NetworkCapabilities capabilities = connectivity.getNetworkCapabilities(active);
-            return capabilities != null
-                && !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-                && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
-        } catch (RuntimeException ex) {
-            // 读不到就按「没有别的出口」处理：宁可尝试连回学校网络，也不把用户晾在「等待校园网」。
-            return false;
-        }
-    }
-    /** 外网探测复用门户模块既有的探测原语；探测失败（含取消）按外网不可达处理，与 Windows 版一致。 */
-    private boolean internetReachable(PortalClient client) {
-        try { return client.internetOk(); }
-        catch (IOException ex) { return false; }
-    }
-    /** 同一结论只记一次日志，避免掉线期间每一轮巡检都刷屏（与 Windows 版一致）。 */
-    private void healNote(long token, String note) {
-        if (note.equals(lastHealNote)) return;
-        lastHealNote = note;
-        safeLog(token, note);
-    }
     private void updateAccount(long token, AccountDraft draft) {
         String password = "";
         final PortalClient.Status[] observed = {PortalClient.Status.unreachable()};
