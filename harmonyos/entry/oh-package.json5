@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "陕Star校园网自动登录 HarmonyOS 入口模块",
+  "main": "",
+  "author": "",
+  "license": "MIT",
+  "dependencies": {}
+}

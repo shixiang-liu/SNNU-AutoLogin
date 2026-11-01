@@ -1,0 +1,11 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "snnu-autologin-harmony",
+  "version": "1.0.0",
+  "description": "陕Star校园网自动登录 —— HarmonyOS NEXT 客户端",
+  "main": "",
+  "author": "",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {}
+}

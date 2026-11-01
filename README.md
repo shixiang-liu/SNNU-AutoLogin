@@ -128,6 +128,17 @@ install -Dm644 systemd/snnulogin.service ~/.config/systemd/user/snnulogin.servic
 
 详见 [iOS 快捷指令配置指南](ios/shortcuts-guide.md)；自签 ipa 路线的可行性、成本与功能边界见 [iOS ipa 路线评估](ios/ipa-roadmap.md)。
 
+### HarmonyOS NEXT
+
+原生 ArkTS / ArkUI 客户端（Stage 模型，API 12+），功能面与 Android 1.0.0 对齐：**登录 / 状态 / 断开 + 应用存活期间的掉线重连**。
+
+- 退到后台后靠「长时任务」（`KEEP_BACKGROUND_RUNNING`）保持每 15 秒一次的状态轮询，掉线自动重新提交认证；长时任务被系统回收时降级为前台轮询，登录功能不受影响。
+- 协议与桌面端逐字一致：11 端口 failover、5 字段表单、状态页 ASCII 隐藏框正则提取（抗 gb2312 乱码）、gb18030 解码。对照表见 [协议对齐说明](harmonyos/PROTOCOL.md)。
+- 与 Android 相同，**手机端不做 Wi-Fi 自愈**，连接哪个 Wi-Fi 由系统自动化接管。
+- 账号密码只驻留内存，退出应用即丢弃。
+
+用 DevEco Studio 打开 `harmonyos/` 目录即可运行；签名、真机调试与常见问题见 [HarmonyOS 使用指南](harmonyos/README.md)。
+
 ## Wi-Fi 自愈
 
 只在**同时**满足下面三条时动手，缺一不可：

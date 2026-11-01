@@ -1,0 +1,80 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "陕Star校园网自动登录"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "陕Star校园网自动登录主入口"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "陕Star校园网"
+    },
+    {
+      "name": "reason_keep_background",
+      "value": "在应用运行期间持续检测校园网认证状态，掉线后自动重新登录"
+    },
+    {
+      "name": "app_title",
+      "value": "陕Star校园网"
+    },
+    {
+      "name": "label_account",
+      "value": "学号"
+    },
+    {
+      "name": "label_password",
+      "value": "密码"
+    },
+    {
+      "name": "label_operator",
+      "value": "上网方式"
+    },
+    {
+      "name": "operator_campus",
+      "value": "校园网"
+    },
+    {
+      "name": "operator_mobile",
+      "value": "移动"
+    },
+    {
+      "name": "operator_unicom",
+      "value": "联通"
+    },
+    {
+      "name": "action_login",
+      "value": "登录"
+    },
+    {
+      "name": "action_status",
+      "value": "状态"
+    },
+    {
+      "name": "action_logout",
+      "value": "断开"
+    },
+    {
+      "name": "switch_auto",
+      "value": "掉线自动重连"
+    },
+    {
+      "name": "status_title",
+      "value": "当前状态"
+    },
+    {
+      "name": "notify_channel_name",
+      "value": "校园网连接"
+    },
+    {
+      "name": "notify_channel_desc",
+      "value": "显示校园网认证状态与掉线重连结果"
+    },
+    {
+      "name": "notify_title",
+      "value": "校园网连接"
+    }
+  ]
+}

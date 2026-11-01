@@ -1,0 +1,80 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "SNNU campus network auto login"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "SNNU campus network auto login entry"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "SNNU Login"
+    },
+    {
+      "name": "reason_keep_background",
+      "value": "Keep checking campus portal status while the app runs and re-login after a drop"
+    },
+    {
+      "name": "app_title",
+      "value": "SNNU Login"
+    },
+    {
+      "name": "label_account",
+      "value": "Student ID"
+    },
+    {
+      "name": "label_password",
+      "value": "Password"
+    },
+    {
+      "name": "label_operator",
+      "value": "Operator"
+    },
+    {
+      "name": "operator_campus",
+      "value": "Campus"
+    },
+    {
+      "name": "operator_mobile",
+      "value": "Mobile"
+    },
+    {
+      "name": "operator_unicom",
+      "value": "Unicom"
+    },
+    {
+      "name": "action_login",
+      "value": "Login"
+    },
+    {
+      "name": "action_status",
+      "value": "Status"
+    },
+    {
+      "name": "action_logout",
+      "value": "Logout"
+    },
+    {
+      "name": "switch_auto",
+      "value": "Re-login after a drop"
+    },
+    {
+      "name": "status_title",
+      "value": "Status"
+    },
+    {
+      "name": "notify_channel_name",
+      "value": "Campus connection"
+    },
+    {
+      "name": "notify_channel_desc",
+      "value": "Shows campus portal status and re-login results"
+    },
+    {
+      "name": "notify_title",
+      "value": "Campus connection"
+    }
+  ]
+}

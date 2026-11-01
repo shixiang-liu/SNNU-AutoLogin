@@ -1,0 +1,11 @@
+# DevEco Studio / hvigor 产物
+/node_modules
+/oh_modules
+/local.properties
+/.hvigor
+**/.hvigor
+**/build
+**/oh_modules
+/.idea
+*.iml
+.DS_Store
