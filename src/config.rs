@@ -215,6 +215,25 @@ pub fn save_config(cfg: &Config, password: &str) -> std::io::Result<()> {
     atomic_write(&cfg_path(), &s)
 }
 
+/// 只改配置字段，密码密文原样保留：解密失败也不会把已保存的密码写没。
+#[cfg(windows)]
+pub fn update_config(f: impl FnOnce(&mut Config)) -> std::io::Result<()> {
+    update_config_at(&cfg_path(), f)
+}
+
+#[cfg(windows)]
+fn update_config_at(path: &Path, f: impl FnOnce(&mut Config)) -> std::io::Result<()> {
+    let _lock = crate::process_lock::ProcessLock::acquire(path, Duration::from_secs(5))?;
+    let mut cfg = match fs::read_to_string(path) {
+        Ok(raw) => serde_json::from_str(&raw)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Config::default(),
+        Err(e) => return Err(e),
+    };
+    f(&mut cfg);
+    atomic_write(path, &serde_json::to_string_pretty(&cfg)?)
+}
+
 pub fn load_state() -> State {
     let raw = fs::read_to_string(state_path()).unwrap_or_default();
     serde_json::from_str(&raw).unwrap_or_default()
@@ -337,6 +356,37 @@ mod tests {
         assert!(result.status.success(), "空配置环境校验失败");
         assert!(!profile.join(APP_NAME).exists());
         fs::remove_dir(profile).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn field_update_rewrites_only_the_changed_field_and_keeps_the_ciphertext() {
+        let path = sandbox().with_file_name("config.json");
+        // 写一份「已经加密过」的配置：密文就是一段不透明字符串，这里不参与解密。
+        let original = Config {
+            account: "20241234".into(),
+            password_enc: "dpapi-ciphertext-fixture".into(),
+            operator: "mobile".into(),
+            keepalive: true,
+            keepalive_min: 15,
+            wifi_self_heal: true,
+            ssid: "SNNU".into(),
+        };
+        fs::write(&path, serde_json::to_string_pretty(&original).unwrap()).unwrap();
+
+        update_config_at(&path, |c| c.wifi_self_heal = false).unwrap();
+
+        let saved: Config = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(!saved.wifi_self_heal);
+        assert_eq!(saved.account, original.account);
+        assert_eq!(saved.operator, original.operator);
+        assert_eq!(saved.ssid, original.ssid);
+        assert_eq!(saved.keepalive, original.keepalive);
+        assert_eq!(
+            saved.password_enc, original.password_enc,
+            "只改一个布尔字段，不能碰密码密文"
+        );
+        fs::remove_file(&path).unwrap();
     }
 
     #[test]

@@ -51,6 +51,8 @@ const AUTO_START: i32 = 203;
 const CHECK_NETWORK: i32 = 113;
 const HELP: i32 = 206;
 const DELETE: i32 = 208;
+const WIFI_HEAL: i32 = 214;
+const DAEMON_STATE: i32 = 215;
 const FEATURES: i32 = 209;
 const FEATURE_START: i32 = 510;
 const FEATURE_ITEMS: [(&str, &str); 9] = [
@@ -201,13 +203,21 @@ fn controls() -> Vec<Control> {
             Toggle,
         ),
         c(
+            WIFI_HEAL,
+            Some(Settings),
+            (24, 320, 332, 62),
+            "断网时自动连回校园 Wi-Fi\n已开启，本身没网且门户不可达时自动连回",
+            Toggle,
+        ),
+        c(
             FEATURES,
             Some(Settings),
-            (24, 328, 332, 42),
+            (24, 402, 332, 42),
             "功能介绍",
             Row,
         ),
-        c(HELP, Some(Settings), (24, 382, 332, 42), "网络信息", Row),
+        c(HELP, Some(Settings), (24, 456, 332, 42), "网络信息", Row),
+        c(DAEMON_STATE, Some(Settings), (24, 510, 332, 20), "", Center),
         c(
             INTRO,
             Some(Account),
@@ -338,6 +348,7 @@ struct Snapshot {
     configured: bool,
     running: bool,
     startup: bool,
+    wifi_self_heal: bool,
     state: config::State,
 }
 impl Snapshot {
@@ -381,6 +392,7 @@ impl Snapshot {
             configured: kind != "setup",
             running: true,
             startup: true,
+            wifi_self_heal: true,
             state,
         }
     }
@@ -537,9 +549,8 @@ fn control_font(gfx: &Gfx, id: i32) -> HFONT {
         INFO_SUB => gfx.small,
         TITLE => gfx.title,
         NETWORK | PAGE_TITLE | ACCOUNT_VALUE => gfx.heading,
-        FOOT | PRIVACY | OP_HINT | ACCOUNT_CAPTION | OP_VALUE | DIAG_HINT | VERSION | NOTE => {
-            gfx.small
-        }
+        FOOT | PRIVACY | OP_HINT | ACCOUNT_CAPTION | OP_VALUE | DIAG_HINT | VERSION | NOTE
+        | DAEMON_STATE => gfx.small,
         _ => gfx.body,
     }
 }
@@ -653,7 +664,7 @@ unsafe fn layout(hwnd: HWND) {
     };
     let mut height = match page {
         Page::Home => 472 + home_extra,
-        Page::Settings => 448,
+        Page::Settings => 554,
         Page::Account => {
             if configured {
                 592
@@ -667,7 +678,7 @@ unsafe fn layout(hwnd: HWND) {
     height += account_extra;
     if !note.is_empty() {
         height = height.max(match page {
-            Page::Settings => 440 + note_height + 24,
+            Page::Settings => 538 + note_height + 24,
             Page::Help => 584 + info_extra + note_height + 18,
             Page::Features => 712 + note_height + 18,
             Page::Home => 420 + home_extra + note_height + 18,
@@ -710,7 +721,7 @@ unsafe fn layout(hwnd: HWND) {
             y = match page {
                 Page::Home => 420 + home_extra,
                 Page::Account => 397,
-                Page::Settings => 440,
+                Page::Settings => 538,
                 Page::Help => 584 + info_extra,
                 Page::Features => 712,
             };
@@ -772,6 +783,7 @@ unsafe fn layout(hwnd: HWND) {
     );
     text(hwnd, NOTE, &note);
     if page == Page::Settings && !configured {
+        // 自愈复选框独立于账号配置，未设置账号时仍可调整
         for id in [AUTO_CONNECT, AUTO_START] {
             let _ = EnableWindow(child(hwnd, id), false);
         }
@@ -948,6 +960,8 @@ unsafe fn apply_snapshot(hwnd: HWND, mut snap: Snapshot) {
     if !preview {
         snap.state = config::load_state();
         snap.startup = autostart::enabled();
+        // 保存完成时快照还是旧的，这里直接读回刚写入的配置，勾选立刻生效。
+        snap.wifi_self_heal = config::load_config().0.wifi_self_heal;
     }
     let view = ui_model::present(
         &snap.status,
@@ -1069,11 +1083,13 @@ unsafe fn apply_snapshot(hwnd: HWND, mut snap: Snapshot) {
             "开机自动运行\n已关闭，需要时手动打开"
         },
     );
+    text(hwnd, WIFI_HEAL, wifi_heal_text(snap.wifi_self_heal));
+    text(hwnd, DAEMON_STATE, daemon_state_text(snap.running));
     if ui().page == Page::Help {
         update_help(hwnd);
     }
     let _ = InvalidateRect(hwnd, None, false);
-    for id in [AUTO_CONNECT, AUTO_START, ACCOUNT_ROW, PRIMARY] {
+    for id in [AUTO_CONNECT, AUTO_START, WIFI_HEAL, ACCOUNT_ROW, PRIMARY] {
         let _ = InvalidateRect(child(hwnd, id), None, false);
     }
     apply_busy_label(hwnd);
@@ -1112,6 +1128,7 @@ fn probe() -> Snapshot {
         configured,
         running,
         startup: autostart::enabled(),
+        wifi_self_heal: cfg.wifi_self_heal,
         state: config::load_state(),
     }
 }
@@ -1232,6 +1249,7 @@ fn busy_target(page: Page, focused: i32) -> i32 {
         SAVE,
         AUTO_CONNECT,
         AUTO_START,
+        WIFI_HEAL,
         CHECK_NETWORK,
         DELETE,
     ]
@@ -1505,6 +1523,54 @@ unsafe fn toggle_pause(hwnd: HWND) {
     );
 }
 
+fn wifi_heal_text(enabled: bool) -> &'static str {
+    if enabled {
+        "断网时自动连回校园 Wi-Fi\n已开启，本身没网且门户不可达时自动连回"
+    } else {
+        "断网时自动连回校园 Wi-Fi\n已关闭，不会切换 Wi-Fi"
+    }
+}
+
+fn daemon_state_text(running: bool) -> &'static str {
+    if running {
+        "后台运行中，关闭界面后仍会继续巡检"
+    } else {
+        "后台已停止，登录与自愈都不会运行"
+    }
+}
+
+/// 开关只改配置，不碰网络：下一次守护循环读到新值就生效。
+unsafe fn toggle_wifi_self_heal(hwnd: HWND) {
+    let enable = !ui().snapshot.wifi_self_heal;
+    if cfg!(debug_assertions) && ui().preview {
+        let mut snap = ui().snapshot.clone();
+        snap.wifi_self_heal = enable;
+        apply_snapshot(hwnd, snap);
+        return;
+    }
+    job(
+        hwnd,
+        "正在更新…",
+        None,
+        if enable {
+            "已开启断网时自动连回校园 Wi-Fi"
+        } else {
+            "已关闭断网时自动连回校园 Wi-Fi，不会切换 Wi-Fi"
+        },
+        false,
+        move || {
+            // 只改这一个字段：密码密文原样留在文件里，不经过解密再加密。
+            config::update_config(|c| c.wifi_self_heal = enable)
+                .map_err(|e| format!("设置保存失败：{}", e))?;
+            if config::load_config().0.wifi_self_heal == enable {
+                Ok(())
+            } else {
+                Err("未能更改 Wi-Fi 自愈设置，请重试".into())
+            }
+        },
+    );
+}
+
 unsafe fn disconnect(hwnd: HWND) {
     if cfg!(debug_assertions) && ui().preview {
         let mut snap = ui().snapshot.clone();
@@ -1671,6 +1737,7 @@ unsafe fn command(hwnd: HWND, id: i32) {
                 },
             );
         }
+        WIFI_HEAL => toggle_wifi_self_heal(hwnd),
         CHECK_NETWORK => connect(hwnd),
         HELP => page(hwnd, Page::Help),
         FEATURES => page(hwnd, Page::Features),
@@ -2060,10 +2127,10 @@ unsafe fn draw_button(dis: &DRAWITEMSTRUCT) {
             );
         }
         if c.style == Style::Toggle {
-            let on = if c.id == AUTO_CONNECT {
-                !u.snapshot.state.reconnect_paused
-            } else {
-                u.snapshot.startup
+            let on = match c.id {
+                AUTO_CONNECT => !u.snapshot.state.reconnect_paused,
+                WIFI_HEAL => u.snapshot.wifi_self_heal,
+                _ => u.snapshot.startup,
             };
             let x = r.right - s(dpi, 54);
             let y = (r.top + r.bottom) / 2 - s(dpi, 11);
@@ -2278,7 +2345,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         }
                     }
                     FOOT | SUB | PRIVACY | OP_HINT | ACCOUNT_CAPTION | OP_VALUE | VERSION
-                    | DIAG_HINT => MUTED,
+                    | DIAG_HINT | DAEMON_STATE => MUTED,
                     _ => TEXT,
                 }),
             );
@@ -2693,6 +2760,7 @@ pub fn run_win32() -> Result<(), String> {
                 configured: !pwd.is_empty(),
                 running: agent::running(),
                 startup: autostart::enabled(),
+                wifi_self_heal: cfg.wifi_self_heal,
                 state: config::load_state(),
             }
         };
@@ -2900,6 +2968,39 @@ mod tests {
         assert_eq!(busy_target(Page::Account, ACC_EDIT), SAVE);
         assert_eq!(busy_target(Page::Home, 0), PRIMARY);
         assert_eq!(busy_target(Page::Settings, AUTO_START), AUTO_START);
+    }
+
+    #[test]
+    fn wifi_self_heal_toggle_states_explain_what_it_does_and_does_not_do() {
+        let on = wifi_heal_text(true);
+        let off = wifi_heal_text(false);
+        assert!(on.contains("断网时自动连回校园 Wi-Fi"));
+        assert!(off.contains("不会切换 Wi-Fi"));
+        assert_ne!(on, off);
+    }
+
+    #[test]
+    fn daemon_indicator_reports_whether_background_work_continues() {
+        assert!(daemon_state_text(true).contains("后台运行中"));
+        assert!(daemon_state_text(false).contains("后台已停止"));
+    }
+
+    #[test]
+    fn settings_page_offers_wifi_heal_toggle_and_daemon_state() {
+        let settings: Vec<i32> = controls()
+            .into_iter()
+            .filter(|c| c.page == Some(Page::Settings))
+            .map(|c| c.id)
+            .collect();
+        assert!(settings.contains(&WIFI_HEAL));
+        assert!(settings.contains(&DAEMON_STATE));
+        // 后台状态提示排在所有可点控件下面，不会插在设置项中间。
+        let toggle = controls().into_iter().find(|c| c.id == WIFI_HEAL).unwrap();
+        let state = controls()
+            .into_iter()
+            .find(|c| c.id == DAEMON_STATE)
+            .unwrap();
+        assert!(toggle.rect.1 + toggle.rect.3 <= state.rect.1);
     }
 
     #[test]

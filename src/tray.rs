@@ -381,6 +381,19 @@ fn show_menu(hwnd: HWND, quit: &Arc<AtomicBool>) {
         }
         5 => {
             unsafe {
+                // 只关界面：后台守护照常巡检，自愈继续。
+                // 界面负责未保存的草稿；关掉后不被界面重新拉起。
+                if let Ok(window) = FindWindowW(None, windows::core::w!("校园网自动登录")) {
+                    let _ = PostMessageW(window, WM_CLOSE, WPARAM(0), LPARAM(0));
+                    return;
+                }
+                // 界面已经关掉时后台仍在巡检，这里只留一条痕迹，不退出进程。
+                crate::config::logf("关闭界面：当前没有打开的界面窗口");
+            }
+            return;
+        }
+        8 => {
+            unsafe {
                 // 界面负责未保存的草稿；退出后不被界面重新拉起。
                 if let Ok(window) = FindWindowW(None, windows::core::w!("校园网自动登录")) {
                     let _ =
@@ -673,6 +686,33 @@ mod tests {
                 GetMenuState(menu, Command::Automatic as u32, MF_BYCOMMAND) & MF_GRAYED.0,
                 0
             );
+            DestroyMenu(menu).unwrap();
+        }
+    }
+    #[test]
+    fn native_menu_separates_closing_the_window_from_stopping_the_background() {
+        unsafe {
+            let context = Context {
+                configured: true,
+                paused: false,
+                restricted: false,
+                no_internet: false,
+                busy: false,
+                link: Link::Online,
+            };
+            let menu = create_menu(&context).unwrap();
+            let label = |id: u32| {
+                let mut buf = [0u16; 64];
+                let len = GetMenuStringW(menu, id, Some(&mut buf), MF_BYCOMMAND) as usize;
+                String::from_utf16_lossy(&buf[..len])
+            };
+            assert_eq!(label(Command::Quit as u32), "关闭界面");
+            assert_eq!(label(Command::QuitAll as u32), "退出并停止后台");
+            for id in [Command::Quit, Command::QuitAll] {
+                let state = GetMenuState(menu, id as u32, MF_BYCOMMAND);
+                assert_ne!(state, u32::MAX, "菜单项必须存在");
+                assert_eq!(state & MF_GRAYED.0, 0, "退出项任何时候都可点");
+            }
             DestroyMenu(menu).unwrap();
         }
     }

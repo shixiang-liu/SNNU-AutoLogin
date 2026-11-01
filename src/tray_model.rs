@@ -64,9 +64,13 @@ pub enum Command {
     Open = 1,
     Retry = 2,
     Disconnect = 3,
+    /// Windows 上只关闭界面，后台守护继续巡检；macOS 仍是「退出程序」
     Quit = 5,
     Automatic = 6,
     Settings = 7,
+    /// 界面与后台一起退出，只有 Windows 托盘提供
+    #[cfg(windows)]
+    QuitAll = 8,
 }
 
 pub struct Context {
@@ -153,6 +157,13 @@ pub fn menu(c: &Context) -> Vec<Entry> {
         false,
     ));
     entries.push(Entry::Separator);
+    #[cfg(windows)]
+    {
+        // 关界面不等于停后台：自愈要继续跑，真正的退出口单独一项。
+        entries.push(action(Command::Quit, "关闭界面", true, false));
+        entries.push(action(Command::QuitAll, "退出并停止后台", true, false));
+    }
+    #[cfg(not(windows))]
     entries.push(action(Command::Quit, "退出程序", true, false));
     entries
 }
@@ -223,6 +234,30 @@ mod tests {
         assert_eq!(action(&c, Command::Automatic), Some((false, false)));
         assert_eq!(action(&c, Command::Disconnect), Some((false, false)));
     }
+    #[cfg(windows)]
+    #[test]
+    fn closing_the_window_is_separate_from_stopping_the_background() {
+        let c = online();
+        let labels: Vec<&str> = menu(&c)
+            .into_iter()
+            .filter_map(|e| match e {
+                Entry::Action { label, .. } => Some(label),
+                _ => None,
+            })
+            .collect();
+        // 关界面不停后台，真正退出是单独一项，两项都不能缺。
+        assert!(labels.contains(&"关闭界面"));
+        assert!(labels.contains(&"退出并停止后台"));
+        assert!(!labels.contains(&"退出程序"));
+        assert_ne!(
+            Command::Quit as u32,
+            Command::QuitAll as u32,
+            "两项必须走不同的菜单命令"
+        );
+        assert_eq!(action(&c, Command::Quit), Some((true, false)));
+        assert_eq!(action(&c, Command::QuitAll), Some((true, false)));
+    }
+
     #[test]
     fn busy_menu_prevents_repeated_actions_but_remains_navigable() {
         let mut c = online();
