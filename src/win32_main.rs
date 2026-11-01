@@ -130,6 +130,23 @@ fn doctor() {
     }
 }
 
+/// 只读诊断：有线与 Wi-Fi 现状（自愈的判断依据），不做任何连接动作
+fn wifi_info() {
+    let cmd = crate::windows_wifi::SystemCmd;
+    console_out(&format!(
+        "有线　　{}",
+        if crate::windows_wifi::wired_connected(&cmd) {
+            "已连接"
+        } else {
+            "没连"
+        }
+    ));
+    console_out(&format!(
+        "Wi-Fi　　{}",
+        crate::windows_wifi::current_wifi_ssid(&cmd).unwrap_or_else(|| "没连".into())
+    ));
+}
+
 /// 一键诊断：--doctor 的内容 + 最近日志，写到桌面，方便反馈问题时直接附上
 pub(crate) unsafe fn export_diag(hwnd: HWND) {
     let raw = hwnd.0 as isize;
@@ -230,6 +247,10 @@ pub fn run() {
     if has("--probe") {
         let (st, port) = portal::status(Duration::from_secs(5));
         console_out(&format!("{:?} port={}", st, port));
+        return;
+    }
+    if has("--wifi-info") {
+        wifi_info();
         return;
     }
     if has("--doctor") {

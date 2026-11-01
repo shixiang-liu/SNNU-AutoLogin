@@ -30,6 +30,15 @@ pub struct Config {
     pub keepalive: bool,
     #[serde(default = "default_keepalive_min")]
     pub keepalive_min: u64,
+    /// Wi-Fi 自愈：本身无网、门户不可达、又不在校园网里时，自动连回学校 Wi-Fi（仅 Windows 端口使用）
+    // 带 cfg：macOS 端口不参与自愈，src/macos/app.rs 的 Config 字面量也就不用跟着加字段
+    #[cfg(windows)]
+    #[serde(default = "default_wifi_self_heal")]
+    pub wifi_self_heal: bool,
+    /// 自愈目标 Wi-Fi 名称，留空按默认学校网络
+    #[cfg(windows)]
+    #[serde(default = "default_ssid")]
+    pub ssid: String,
 }
 
 fn default_keepalive() -> bool {
@@ -37,6 +46,14 @@ fn default_keepalive() -> bool {
 }
 fn default_keepalive_min() -> u64 {
     15
+}
+#[cfg(windows)]
+fn default_wifi_self_heal() -> bool {
+    true
+}
+#[cfg(windows)]
+fn default_ssid() -> String {
+    crate::windows_wifi::DEFAULT_SSID.to_string()
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

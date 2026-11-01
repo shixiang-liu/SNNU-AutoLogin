@@ -1448,6 +1448,12 @@ unsafe fn save_account(hwnd: HWND) {
                     } else {
                         old.keepalive_min.max(5)
                     },
+                    wifi_self_heal: if first { true } else { old.wifi_self_heal },
+                    ssid: if old.ssid.trim().is_empty() {
+                        crate::windows_wifi::DEFAULT_SSID.to_string()
+                    } else {
+                        old.ssid.clone()
+                    },
                     password_enc: String::new(),
                 };
                 config::save_config(&cfg, &password).map_err(|e| format!("账号保存失败：{}", e))?;

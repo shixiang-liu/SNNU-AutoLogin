@@ -18,6 +18,8 @@ mod ui_model;
 #[cfg(windows)]
 mod win32_main;
 #[cfg(windows)]
+mod windows_wifi;
+#[cfg(windows)]
 use win32_main::export_diag;
 #[cfg(target_os = "macos")]
 mod macos;

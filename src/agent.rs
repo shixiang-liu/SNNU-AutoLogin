@@ -235,6 +235,8 @@ pub fn run_daemon() {
     let mut last_wake = 0.0f64;
     let mut last_ping_ok = portal::unix_now();
     let mut reconnect_started: Option<std::time::Instant> = None;
+    #[cfg(windows)]
+    let mut wifi_heal = crate::windows_wifi::HealState::default();
     while !quit.load(Ordering::SeqCst) {
         if wake.swap(false, Ordering::SeqCst) {
             last_wake = portal::unix_now();
@@ -284,6 +286,10 @@ pub fn run_daemon() {
                     was_online = false;
                 }
                 crate::tray::set_link(crate::tray::Link::Waiting);
+                // 本身没网、门户也不可达、又不在校园网里时，才把 Wi-Fi 连回学校网络
+                // （只连系统已保存的配置；有线在线或已连学校 Wi-Fi 都不干预）
+                #[cfg(windows)]
+                crate::windows_wifi::heal_on_unreachable(&cfg, &mut wifi_heal, &quit, &wake);
                 // 刚唤醒时网卡可能还没就绪，密集重试几次
                 sleep(if just_woke { 1 } else { 8 }, &quit, &wake)
             }
@@ -444,7 +450,7 @@ fn recovery_text(elapsed: Duration) -> String {
 }
 
 #[cfg(windows)]
-fn sleep(secs: u64, quit: &Arc<AtomicBool>, wake: &Arc<AtomicBool>) {
+pub(crate) fn sleep(secs: u64, quit: &Arc<AtomicBool>, wake: &Arc<AtomicBool>) {
     let step = Duration::from_millis(200);
     let mut left = secs * 1000;
     while left > 0 && !quit.load(Ordering::SeqCst) {
