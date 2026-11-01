@@ -120,6 +120,13 @@ install -Dm644 systemd/snnulogin.service ~/.config/systemd/user/snnulogin.servic
 
 详见 [Android 使用指南](android/README.md)。
 
+### iOS
+
+系统不开放 Wi-Fi 控制与后台常驻能力，本仓库不提供 iOS 原生客户端。推荐用系统自带的「快捷指令」实现等效体验：
+**加入 SNNU 网络时自动提交门户登录**，无需越狱、无需签名、无需电脑。
+
+详见 [iOS 快捷指令配置指南](ios/shortcuts-guide.md)；自签 ipa 路线的可行性、成本与功能边界见 [iOS ipa 路线评估](ios/ipa-roadmap.md)。
+
 ## Wi-Fi 自愈
 
 只在**同时**满足下面三条时动手，缺一不可：
