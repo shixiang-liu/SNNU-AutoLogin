@@ -29,6 +29,7 @@
 | **Windows**<br><sub>Windows 10 / 11 · x64</sub> | [单文件 EXE](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/v1.0.1/SNNU-AutoLogin.exe) · [免安装 ZIP](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/v1.0.1/SNNU-AutoLogin-v1.0.1-windows-x64.zip) |
 | **macOS**<br><sub>macOS 13 及以上</sub> | [M 系列芯片](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/macos-v1.0.0/SNNU-AutoLogin-v1.0.0-macos-arm64.zip) · [Intel 芯片](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/macos-v1.0.0/SNNU-AutoLogin-v1.0.0-macos-x64.zip) |
 | **Android**<br><sub>Android 8.0 及以上</sub> | [安装 APK](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/android-v1.0.0/SNNU-AutoLogin-android.apk) |
+| **Linux**<br><sub>无头版 · amd64</sub> | 自行打包 deb / tar.gz：[安装说明](packaging/linux/INSTALL.md) |
 
 Windows 可直接运行 EXE，ZIP 需先解压。Mac 首次打开请参照[安装说明](docs/macos.md#第一次使用)。[查看更新记录 →](https://github.com/shixiang-liu/SNNU-AutoLogin/releases)
 
@@ -51,6 +52,24 @@ Windows 可直接运行 EXE，ZIP 需先解压。Mac 首次打开请参照[安�
 工具负责校园网认证，不会替你切换 Wi-Fi。Android 如需锁屏后持续重连，请检查「后台与通知」设置。
 
 使用指南：[Windows](docs/windows.md) · [macOS](docs/macos.md) · [Android](android/README.md)
+
+## Linux 无头版
+
+没有托盘也没有图形界面：一个 `snnulogin --daemon` 常驻进程按周期探测门户、自动认证、掉线重连，
+参数与 Windows 端口对齐（`--status` / `--setup` / `--wifi-info` / `--logoff` / `--doctor`）。
+
+```bash
+scripts/package-linux.sh                  # 产出 dist/linux 下的 deb 与 tar.gz
+sudo dpkg -i dist/linux/snnulogin_*_amd64.deb
+snnulogin --setup --account 学号 --password 密码
+systemctl --user enable --now snnulogin   # 没有 systemd 用户会话（如 WSL）时前台运行
+```
+
+配置与日志在 `~/.config/snnulogin/`。Linux 上没有 DPAPI 和钥匙串，密码是 0600 权限下的
+base64——**不是加密**，目录权限是本端唯一防线。Wi-Fi 自愈与 Windows 端口同一套三条件门控，
+有线判 `/sys/class/net`、SSID 读 `nmcli`，系统没有 nmcli 时自动跳过；连接动作默认打桩，
+需要真实切换时设 `SNNU_ALLOW_WIFI_CONNECT=1`。详细步骤见
+[packaging/linux/INSTALL.md](packaging/linux/INSTALL.md)。
 
 ## 体积与内存
 

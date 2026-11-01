@@ -1063,6 +1063,8 @@ fn local_naive_now() -> f64 {
     let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
     #[cfg(target_os = "macos")]
     let t = crate::macos::local_time();
+    #[cfg(target_os = "linux")]
+    let t = crate::linux::local_time();
     days_from_civil(t.wYear as i64, t.wMonth as i64, t.wDay as i64) as f64 * 86400.0
         + (t.wHour as i64 * 3600 + t.wMinute as i64 * 60 + t.wSecond as i64) as f64
 }

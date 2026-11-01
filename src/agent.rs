@@ -14,7 +14,10 @@ pub fn ctl_port() -> u16 {
     if s.ctl_port > 0 {
         return s.ctl_port;
     }
-    let user = std::env::var("USERNAME").unwrap_or_else(|_| "user".into());
+    // Windows 用 USERNAME，Linux 用 USER；都取不到时退回固定偏移
+    let user = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "user".into());
     let sum: u32 = user.bytes().map(|b| b as u32).sum();
     49721 + (sum % 400) as u16
 }
@@ -202,11 +205,16 @@ pub fn run_daemon() {
     );
     #[cfg(target_os = "macos")]
     let (quit, wake) = crate::macos::runtime::signals();
+    // 无头端口：SIGTERM/SIGINT 置退出标志，网络变化置唤醒标志
+    #[cfg(target_os = "linux")]
+    let (quit, wake) = crate::linux::runtime::signals();
     #[cfg(windows)]
     {
         spawn_net_watch(wake.clone());
         spawn_power_watch(wake.clone());
     }
+    #[cfg(target_os = "linux")]
+    crate::network::spawn_net_watch(wake.clone());
     crate::tray::start(quit.clone());
     {
         let quit = quit.clone();
@@ -237,6 +245,8 @@ pub fn run_daemon() {
     let mut reconnect_started: Option<std::time::Instant> = None;
     #[cfg(windows)]
     let mut wifi_heal = crate::windows_wifi::HealState::default();
+    #[cfg(target_os = "linux")]
+    let mut wifi_heal = crate::linux::wifi::HealState::default();
     while !quit.load(Ordering::SeqCst) {
         if wake.swap(false, Ordering::SeqCst) {
             last_wake = portal::unix_now();
@@ -257,6 +267,8 @@ pub fn run_daemon() {
             }
             crate::tray::refresh_tip();
             #[cfg(windows)]
+            sleep(1, &quit, &wake);
+            #[cfg(target_os = "linux")]
             sleep(1, &quit, &wake);
             #[cfg(target_os = "macos")]
             sleep(
@@ -290,6 +302,8 @@ pub fn run_daemon() {
                 // （只连系统已保存的配置；有线在线或已连学校 Wi-Fi 都不干预）
                 #[cfg(windows)]
                 crate::windows_wifi::heal_on_unreachable(&cfg, &mut wifi_heal, &quit, &wake);
+                #[cfg(target_os = "linux")]
+                crate::linux::wifi::heal_on_unreachable(&cfg, &mut wifi_heal, &quit, &wake);
                 // 刚唤醒时网卡可能还没就绪，密集重试几次
                 sleep(if just_woke { 1 } else { 8 }, &quit, &wake)
             }
@@ -697,4 +711,43 @@ fn claim_daemon_instance() -> bool {
 #[cfg(target_os = "macos")]
 fn sleep(secs: u64, quit: &Arc<AtomicBool>, wake: &Arc<AtomicBool>) {
     crate::macos::runtime::wait(Duration::from_secs(secs), quit, wake);
+}
+
+/// 无头守护：脱离当前终端启动，日志由进程自己写进配置目录
+#[cfg(target_os = "linux")]
+pub fn spawn_daemon() {
+    let _ = std::process::Command::new(crate::exe_path())
+        .arg("--daemon")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+/// 后台守护只允许一个：用 flock 占住配置目录里的守护锁，进程退出（含崩溃）由内核释放
+#[cfg(target_os = "linux")]
+fn claim_daemon_instance() -> bool {
+    let path = crate::config::app_dir().join("daemon.lock");
+    match crate::process_lock::ProcessLock::acquire(&path, Duration::from_millis(0)) {
+        Ok(lock) => {
+            // 故意不释放：锁要跟进程同生共死
+            std::mem::forget(lock);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn sleep(secs: u64, quit: &Arc<AtomicBool>, wake: &Arc<AtomicBool>) {
+    let step = Duration::from_millis(200);
+    let mut left = secs * 1000;
+    while left > 0 && !quit.load(Ordering::SeqCst) {
+        std::thread::sleep(step);
+        left = left.saturating_sub(200);
+        // 网络一变就结束等待，不必等满周期
+        if wake.load(Ordering::SeqCst) {
+            break;
+        }
+    }
 }
