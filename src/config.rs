@@ -30,7 +30,8 @@ pub struct Config {
     pub keepalive: bool,
     #[serde(default = "default_keepalive_min")]
     pub keepalive_min: u64,
-    /// Wi-Fi 自愈：本身无网、门户不可达、又不在校园网里时，自动连回学校 Wi-Fi（Windows 与 macOS 共用）
+    /// Wi-Fi 自愈：本身无网、门户不可达、又不在校园网里时，自动连回学校 Wi-Fi
+    /// （Windows / macOS / Linux 三平台共用同一份决策核心，字段无条件编译）
     #[serde(default = "default_wifi_self_heal")]
     pub wifi_self_heal: bool,
     /// 自愈目标 Wi-Fi 名称，留空按默认学校网络
@@ -84,6 +85,8 @@ pub struct State {
 pub fn app_dir() -> PathBuf {
     #[cfg(target_os = "macos")]
     return crate::macos::storage::app_dir();
+    #[cfg(target_os = "linux")]
+    return crate::linux::storage::app_dir();
     #[cfg(windows)]
     let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
     #[cfg(windows)]
@@ -282,6 +285,11 @@ fn local_time() -> windows::Win32::Foundation::SYSTEMTIME {
     unsafe { GetLocalTime() }
 }
 
+#[cfg(target_os = "linux")]
+fn local_time() -> crate::linux::LocalTime {
+    crate::linux::local_time()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -379,7 +387,7 @@ mod tests {
         assert_eq!(state.portal_host, "fixture.invalid");
         assert!(state.reconnect_paused);
         fs::remove_file(&path).unwrap();
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         fs::remove_file(path.with_extension("lock")).unwrap();
         fs::remove_dir(path.parent().unwrap()).unwrap();
     }
@@ -391,7 +399,7 @@ mod tests {
         assert!(update_state_at(&path, |s| s.net_bad = 9).is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), "broken JSON");
         fs::remove_file(&path).unwrap();
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         fs::remove_file(path.with_extension("lock")).unwrap();
         fs::remove_dir(path.parent().unwrap()).unwrap();
     }
@@ -434,3 +442,8 @@ pub use crate::macos::storage::{load_config, save_config};
 fn local_time() -> crate::macos::LocalTime {
     crate::macos::local_time()
 }
+
+// 无头端口的调用方直接用 linux::storage::save_config，这里保持与 macOS 端口同名的统一入口
+#[cfg(target_os = "linux")]
+#[allow(unused_imports)]
+pub use crate::linux::storage::{load_config, save_config};

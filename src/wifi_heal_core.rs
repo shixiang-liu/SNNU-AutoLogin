@@ -7,7 +7,7 @@
 // 三条都成立后还要确认目标网络真的在范围内，免得在校外每轮都发一次注定失败的连接。
 //
 // 平台差异全部由 WifiAdapter 提供：Windows 用 netsh，macOS 用 networksetup / ifconfig /
-// airport。本模块只做决策、冷却与日志，测试全部打桩。
+// airport，Linux 用 nmcli 加 /sys 链路快照。本模块只做决策、冷却与日志，测试全部打桩。
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -27,7 +27,7 @@ pub enum ProfileState {
     Saved,
     /// 明确没有保存过
     Missing,
-    /// 读不到（平台命令缺失一类），无法判断；netsh 没有这种情况，只有 macOS 侧会产生
+    /// 读不到（平台命令缺失一类），无法判断；netsh 没有这种情况，只有 macOS / Linux 侧会产生
     #[allow(dead_code)]
     Unknown,
 }
@@ -39,7 +39,7 @@ pub enum ConnectReq {
     Requested,
     /// 请求被拒绝或执行失败
     Failed,
-    /// 平台不支持自动连接，reason 用于日志；netsh 没有这种情况，只有 macOS 侧会产生
+    /// 平台不支持自动连接，reason 用于日志；netsh 没有这种情况，只有 macOS / Linux 侧会产生
     #[allow(dead_code)]
     Unsupported(&'static str),
 }
@@ -260,7 +260,7 @@ fn record(state: &mut HealState, outcome: &Outcome) {
 }
 
 /// 门户不可达分支的挂点：三条条件同时成立才把 Wi-Fi 连回学校网络
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 pub fn heal_on_unreachable(
     cfg: &crate::config::Config,
     state: &mut HealState,
@@ -271,6 +271,8 @@ pub fn heal_on_unreachable(
     let probe = crate::windows_wifi::SystemCmd;
     #[cfg(target_os = "macos")]
     let probe = crate::macos::wifi_heal::SystemCmd;
+    #[cfg(target_os = "linux")]
+    let probe = crate::linux::wifi::SystemCmd;
     let mut internet_ok = crate::portal::internet_ok;
     let mut wait = |gap: Duration| crate::agent::sleep(gap.as_secs().max(1), quit, wake);
     let mut recheck = || {
