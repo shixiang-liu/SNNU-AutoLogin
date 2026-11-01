@@ -145,6 +145,17 @@ fn wifi_info() {
         "Wi-Fi　　{}",
         crate::windows_wifi::current_wifi_ssid(&cmd).unwrap_or_else(|| "没连".into())
     ));
+    let (cfg, _) = config::load_config();
+    let ssid = crate::windows_wifi::target_ssid(&cfg);
+    console_out(&format!(
+        "{}　　{}",
+        ssid,
+        if crate::windows_wifi::target_visible(&cmd, &ssid) {
+            "可见"
+        } else {
+            "看不到"
+        }
+    ));
 }
 
 /// 一键诊断：--doctor 的内容 + 最近日志，写到桌面，方便反馈问题时直接附上

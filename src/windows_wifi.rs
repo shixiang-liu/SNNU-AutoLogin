@@ -1,10 +1,11 @@
 // Windows Wi-Fi 自愈：只有“本身没网、门户也不可达、又不在校园网里”三条同时成立，
-// 才把 Wi-Fi 连回学校网络。只连系统里已经保存的配置，不扫描、不新建配置、不改系统设置。
+// 才把 Wi-Fi 连回学校网络。只连系统里已经保存的配置，不新建配置、不改系统设置。
 //
 // 条件 1：外部互联网不可用（只是门户不可达不算，门户自身故障时绝不动 Wi-Fi）
 // 条件 2：门户探测失败
 // 条件 3：没有有线在线，且当前 Wi-Fi 不是目标学校网络
-// 三条都由调用方注入探测函数，本模块只做决策与 netsh 调用，测试全部打桩。
+// 三条都成立后还要确认目标网络真的在范围内，免得在校外每轮都发一次注定失败的连接。
+// 三条条件都由调用方注入探测函数，本模块只做决策与 netsh 调用，测试全部打桩。
 
 use std::process::Stdio;
 use std::sync::atomic::AtomicBool;
@@ -13,7 +14,9 @@ use std::time::{Duration, Instant};
 
 /// 学校 Wi-Fi 的默认名称
 pub const DEFAULT_SSID: &str = "SNNU";
-/// 有线接口名关键字
+/// 有线接口名关键字。只认“以太网 / ethernet”：老命名“本地连接 / Local Area Connection”
+/// 不识别是有意为之——Wi-Fi Direct 虚拟网卡也叫“本地连接* N”，与下面的虚拟网卡关键字
+/// 无法区分，误判成有线会让自愈彻底失效。
 const WIRED_KEYS: [&str; 2] = ["以太网", "ethernet"];
 /// 虚拟网卡关键字：这些接口“已连接”不代表有线在线
 const VIRTUAL_KEYS: [&str; 8] = [
@@ -30,6 +33,8 @@ const VIRTUAL_KEYS: [&str; 8] = [
 const CONNECT_COOLDOWN: Duration = Duration::from_secs(60);
 /// 发起连接后等待门户可达的轮数（每轮 1 秒间隔加一次门户探测）
 const RECHECK_ROUNDS: u32 = 6;
+/// netsh 单次调用上限：超时按探测失败处理，一次卡住的调用不能拖住整个巡检
+const NETSH_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// netsh 执行入口：测试注入打桩实现，生产用 SystemCmd
 pub trait Cmd {
@@ -42,20 +47,42 @@ pub struct SystemCmd;
 
 impl Cmd for SystemCmd {
     fn netsh(&self, args: &[&str]) -> Option<String> {
+        use std::io::Read;
         use std::os::windows::process::CommandExt;
-        let out = std::process::Command::new("netsh")
+        let mut child = std::process::Command::new("netsh")
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            // stderr 不读：netsh 的报错文本用不上，也免得管道满了卡住子进程
+            .stderr(Stdio::null())
             // CREATE_NO_WINDOW：界面程序里跑控制台程序不要闪出黑窗
             .creation_flags(0x08000000)
-            .output()
+            .spawn()
             .ok()?;
-        if !out.status.success() {
+        if !wait_bounded(&mut child, NETSH_TIMEOUT) {
+            // 超时（或等待出错）：结束子进程，按这次探测失败处理
+            let _ = child.kill();
+            let _ = child.wait();
             return None;
         }
-        Some(decode(&out.stdout))
+        if !child.wait().ok()?.success() {
+            return None;
+        }
+        let mut buf = Vec::new();
+        child.stdout.take()?.read_to_end(&mut buf).ok()?;
+        Some(decode(&buf))
+    }
+}
+
+/// 有界等待子进程结束：超时返回 false，由调用方负责收尾
+fn wait_bounded(child: &mut std::process::Child, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
+            _ => return false,
+        }
     }
 }
 
@@ -126,6 +153,28 @@ fn parse_profile_has(text: &str, ssid: &str) -> bool {
         .any(|line| split_key_value(line).is_some_and(|(_, value)| value == ssid))
 }
 
+/// 解析 netsh wlan show networks：可见网络列表里有没有这个名称
+/// （网络条目形如“SSID 1 : SNNU”；“BSSID 1 :”一类不算）
+fn parse_network_visible(text: &str, ssid: &str) -> bool {
+    text.lines().any(|line| {
+        let Some((key, value)) = split_key_value(line) else {
+            return false;
+        };
+        ssid_entry_key(key) && value == ssid
+    })
+}
+
+/// 网络条目的键是“SSID 加序号”，大小写不敏感
+fn ssid_entry_key(key: &str) -> bool {
+    match key.to_ascii_lowercase().strip_prefix("ssid") {
+        Some(rest) => {
+            let rest = rest.trim();
+            !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit())
+        }
+        None => false,
+    }
+}
+
 /// 按首个冒号切出“键 : 值”（中文输出也可能是全角冒号），值已去空白
 fn split_key_value(line: &str) -> Option<(&str, &str)> {
     let line = line.trim();
@@ -140,6 +189,12 @@ fn profile_saved(cmd: &dyn Cmd, ssid: &str) -> bool {
     parse_profile_has(&out, ssid)
 }
 
+/// 目标 Wi-Fi 当前是不是可见（在范围内）
+pub fn target_visible(cmd: &dyn Cmd, ssid: &str) -> bool {
+    let out = cmd.netsh(&["wlan", "show", "networks"]).unwrap_or_default();
+    parse_network_visible(&out, ssid)
+}
+
 /// 连接系统里已保存的 Wi-Fi；没有保存过这个配置就放弃（不新建配置、不改系统设置）
 fn connect_saved(cmd: &dyn Cmd, ssid: &str) -> bool {
     if !profile_saved(cmd, ssid) {
@@ -150,7 +205,7 @@ fn connect_saved(cmd: &dyn Cmd, ssid: &str) -> bool {
 }
 
 /// 自愈目标 SSID：配置留空时按默认学校 Wi-Fi
-fn target_ssid(cfg: &crate::config::Config) -> String {
+pub fn target_ssid(cfg: &crate::config::Config) -> String {
     let ssid = cfg.ssid.trim();
     if ssid.is_empty() {
         DEFAULT_SSID.to_string()
@@ -188,6 +243,8 @@ enum Outcome {
     Idle(Skip),
     /// 距上次连接动作不足冷却时间
     Cooldown,
+    /// 附近看不到目标 Wi-Fi，本轮不连接
+    NotVisible(String),
     /// 系统没有保存目标 Wi-Fi 配置，放弃
     NoProfile(String),
     /// 系统没有连上，连接请求被拒
@@ -279,6 +336,10 @@ fn attempt(
         return Outcome::Cooldown;
     }
     state.last_attempt = Some(Instant::now());
+    // 校外没有目标网络时连接只会白试：跳过也占用冷却，扫描最多每分钟一次
+    if !target_visible(cmd, target) {
+        return Outcome::NotVisible(target.to_string());
+    }
     if connect_saved(cmd, target) {
         let mut portal_ok = false;
         for _ in 0..RECHECK_ROUNDS {
@@ -309,6 +370,7 @@ fn record(state: &mut HealState, outcome: &Outcome) {
         Outcome::Idle(Skip::InternetUp) => "外网可通、门户不可达，不切换 Wi-Fi".to_string(),
         Outcome::Idle(Skip::Wired) => "有线在线，不干预 Wi-Fi".to_string(),
         Outcome::Idle(Skip::OnTarget) => "已经连在目标 Wi-Fi 上，无需自愈".to_string(),
+        Outcome::NotVisible(ssid) => format!("附近看不到 {} 网络，本轮不连接", ssid),
         Outcome::NoProfile(ssid) => format!("系统未保存 {} 配置，放弃自动连接 Wi-Fi", ssid),
         Outcome::ConnectFailed(ssid) => format!("连接 {} 未成功，稍后重试", ssid),
         Outcome::Connected { ssid, portal_ok } => format!(
@@ -387,6 +449,15 @@ Enabled        Connected      Dedicated        Ethernet\n";
 用户配置文件\n\
 -------------\n\
     所有用户配置文件 : OtherWiFi\n";
+    const NETWORKS_SNNU: &str = "接口 WLAN 2 上的网络: 有 2 个网络当前可见。\n\n\
+SSID 1 : OtherWiFi\n\
+    网络类型             : 结构\n\
+    信号                   : 90%\n\n\
+SSID 2 : SNNU\n\
+    网络类型             : 结构\n";
+    const NETWORKS_OTHER: &str = "接口 WLAN 2 上的网络: 有 1 个网络当前可见。\n\n\
+SSID 1 : OtherWiFi\n\
+    网络类型             : 结构\n";
 
     /// 打桩 netsh：按子命令给预置输出，并记录被调用过的子命令
     struct Stub {
@@ -672,6 +743,7 @@ Enabled        Disconnected   Dedicated        Ethernet\n"
             .with("interface show interface", CN_WIRED_DOWN)
             .with("wlan show interfaces", WLAN_OTHER)
             .with("wlan show profiles", PROFILES_SNNU)
+            .with("wlan show networks", NETWORKS_SNNU)
             .with("wlan connect name=SNNU", "连接请求已完成。\n");
         let mut state = HealState::default();
         let mut waits = 0;
@@ -707,6 +779,7 @@ Enabled        Disconnected   Dedicated        Ethernet\n"
         let stub = Stub::new()
             .with("interface show interface", CN_WIRED_DOWN)
             .with("wlan show interfaces", WLAN_OTHER)
+            .with("wlan show networks", NETWORKS_SNNU)
             .with("wlan show profiles", PROFILES_OTHER);
         let mut state = HealState::default();
         let mut wait = |_: Duration| unreachable();
@@ -762,6 +835,7 @@ Enabled        Disconnected   Dedicated        Ethernet\n"
             .with("interface show interface", CN_WIRED_DOWN)
             .with("wlan show interfaces", WLAN_OTHER)
             .with("wlan show profiles", PROFILES_SNNU)
+            .with("wlan show networks", NETWORKS_SNNU)
             .with("wlan connect name=SNNU", "连接请求已完成。\n");
         let mut state = HealState::default();
         let mut wait = |_: Duration| {};
@@ -818,5 +892,89 @@ Enabled        Disconnected   Dedicated        Ethernet\n"
     fn 目标名称留空时回到默认学校网络() {
         assert_eq!(target_ssid(&cfg(true, "  ")), DEFAULT_SSID);
         assert_eq!(target_ssid(&cfg(true, "SNNU-Guest")), "SNNU-Guest");
+    }
+
+    #[test]
+    fn 可见网络按ssid条目匹配并排除bssid() {
+        assert!(parse_network_visible(NETWORKS_SNNU, "SNNU"));
+        assert!(!parse_network_visible(NETWORKS_SNNU, "SNNU-Guest"));
+        assert!(!parse_network_visible(NETWORKS_OTHER, "SNNU"));
+        assert!(!parse_network_visible("", "SNNU"));
+        // mode=bssid 的“BSSID 1”与隐藏网络的空名称都不能算可见
+        let detailed = "SSID 1 : OtherWiFi\n    BSSID 1                 : ac:ce:92:58:1e:a0\n\
+SSID 2 : \n    网络类型             : 结构\n";
+        assert!(!parse_network_visible(detailed, "SNNU"));
+        assert!(!parse_network_visible(detailed, "ac:ce:92:58:1e:a0"));
+    }
+
+    #[test]
+    fn 附近看不到目标网络时跳过连接() {
+        let stub = Stub::new()
+            .with("interface show interface", CN_WIRED_DOWN)
+            .with("wlan show interfaces", WLAN_OTHER)
+            .with("wlan show networks", NETWORKS_OTHER);
+        let mut state = HealState::default();
+        let mut wait = |_: Duration| unreachable();
+        let mut recheck = || unreachable();
+        let outcome = heal_stub(
+            &cfg(true, "SNNU"),
+            &stub,
+            false,
+            &mut state,
+            false,
+            &mut wait,
+            &mut recheck,
+        );
+        assert_eq!(outcome, Outcome::NotVisible("SNNU".to_string()));
+        assert!(!stub.called("wlan show profiles"), "{:?}", stub.all());
+        assert!(
+            !stub
+                .all()
+                .iter()
+                .any(|call| call.starts_with("wlan connect")),
+            "{:?}",
+            stub.all()
+        );
+        // 跳过同样占用冷却：看不到网络时最多每分钟扫描一次
+        let again = heal_stub(
+            &cfg(true, "SNNU"),
+            &stub,
+            false,
+            &mut state,
+            false,
+            &mut wait,
+            &mut recheck,
+        );
+        assert_eq!(again, Outcome::Cooldown);
+        assert_eq!(
+            stub.all()
+                .iter()
+                .filter(|call| call.starts_with("wlan show networks"))
+                .count(),
+            1,
+            "{:?}",
+            stub.all()
+        );
+    }
+
+    #[test]
+    fn netsh调用超时按失败处理() {
+        // ping 要跑约 3 秒：给 300ms 上限必然超时，之后必须能收尾
+        let mut slow = std::process::Command::new("cmd")
+            .args(["/c", "ping -n 4 127.0.0.1 >nul"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        assert!(!wait_bounded(&mut slow, Duration::from_millis(300)));
+        let _ = slow.kill();
+        let _ = slow.wait();
+
+        let mut quick = std::process::Command::new("cmd")
+            .args(["/c", "exit 0"])
+            .spawn()
+            .unwrap();
+        assert!(wait_bounded(&mut quick, NETSH_TIMEOUT));
+        assert!(quick.wait().unwrap().success());
     }
 }
