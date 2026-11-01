@@ -1,6 +1,10 @@
 # Android 验证记录
 
-2026-10-27（Asia/Shanghai），当前版本 **1.0.0 / versionCode 7**。开发测试签名版；真实校园网已验证，厂商自己的电池开关只能以系统页面为准。
+2026-11-01（Asia/Shanghai），当前版本 **1.1.0 / versionCode 3**。开发测试签名版；真实校园网已验证，厂商自己的电池开关只能以系统页面为准。
+
+> 版本号从 1.0.0 升到 1.1.0 与桌面版对齐，versionCode 由 2 改为 3（保持单调，可直接覆盖安装旧测试包）。
+> debug 变体不再加 `.debug` / `-test` 后缀，产物包名就是 `io.github.shixiangliu.snnulogin`；
+> 代价是测试包与正式包不能再共存于同一台设备。
 
 ## 当前版本已通过
 
@@ -62,14 +66,26 @@
 
 ## Wi-Fi 自愈（本轮新增，待 CI 与真机验收）
 
-2026-11-01，分支 `feature/android-self-heal`。与 Windows 版 `src/windows_wifi.rs` 的 `decide()` 同语义：外网不可达、门户不可达、又没连在 SNNU 上，三条同时成立才请求连接学校 Wi-Fi——只是门户故障时不换 Wi-Fi。挂点在门户不可达分支（`LoginService.tick()` 的 `Kind.UNREACHABLE`）；决策是纯 Java（`WifiSelfHeal`），系统调用单独一层（`WifiHealer`）。
+2026-11-01，分支 `android-release`。与 Windows 版 `src/wifi_heal_core.rs` 的 `decide()` 与 `internet_gate()` 对齐：**只有「连接的网络不可用」才自愈**，连着可用网络（校园 Wi-Fi 或手机自己的蜂窝）时绝不强求连 SNNU。决策是纯 Java（`WifiSelfHeal`），系统调用单独一层（`WifiHealer`）。
+
+挂点两处，都在 `LoginService.tick()`：
+
+| 设备此刻的状态 | 判断依据 | 结论 |
+| --- | --- | --- |
+| 连着某个 Wi-Fi，门户不可达 | 经**这张 Wi-Fi** 的外网探测（`WifiTransport` 绑定该网络） | 外网通 → 不动作（`INTERNET_UP`）；已连 SNNU → 不动作（`ON_TARGET_SSID`）；都不通且不是 SNNU → 请求连接 |
+| 没有任何 Wi-Fi 关联 | 手机自己的出口（`getActiveNetwork`，非 Wi-Fi 传输且已 `VALIDATED`） | 有蜂窝 → 不动作（`MOBILE_NETWORK`，用户在用流量）；一点出口都没有 → 请求连接学校网络 |
+
+与桌面的平台差异：桌面「没有任何关联 + 外网通」只能来自 TUN/虚拟网卡，所以 `internet_gate` 判定为「不在校园网里」、继续尝试连回；手机「没有任何关联 + 外网通」是用户自己开的蜂窝数据，判定相反——原地不动。两处都写进 `WifiSelfHeal.decide` 的注释里。
+
+**本轮修正**：此前没有无线关联时 `tick()` 直接 `return`，只显示「请先连接学校 Wi-Fi」，一次自愈尝试都不做，与桌面「没有任何关联时继续尝试连回」不一致。现在该分支也会判一次自愈。
 
 | 检查 | 结果 |
 | --- | --- |
-| 纯决策类 + 离线 JUnit | `WifiSelfHealTest` **11 项通过、0 失败**（javac + JUnit 4.13.2，**未加载 android.jar**，证明决策类没有 Android 依赖） |
-| 既有离线测试零回归 | 既有 **85 项**复跑全过：ConnectionPolicy 6、PortalProtocol 17、PortalClient 14、AccountUpdate 10、ConnectionInspection 3、UiModel 29、SystemSettingsState 6 |
+| 纯决策类 + 离线 JUnit | `WifiSelfHealTest` **15 项通过、0 失败**（javac + JUnit 4.13.2，**未加载 android.jar**，证明决策类没有 Android 依赖） |
+| 既有离线测试零回归 | 合计 **100 项**复跑全过：WifiSelfHeal 15、ConnectionPolicy 6、PortalProtocol 17、PortalClient 14、AccountUpdate 10、ConnectionInspection 3、UiModel 29、SystemSettingsState 6 |
 | Android 组装层可编译 | `WifiHealer` 与 `LoginService` 的改动用 android.jar（API 36 平台桩）+ 最小 R/BuildConfig 桩编译通过 |
-| 真机构建、Lint、设备矩阵 | **本机未验证**：本机没有 Android SDK，无法执行 `gradlew testDebugUnitTest lintDebug assembleBenchmark`；交由 `.github/workflows/android.yml`（含 API 26 与 API 33–37 模拟器矩阵）验收 |
+| 真机构建 | **本机已通过**：`gradlew clean assembleDebug` 成功，产物 `dist/SNNU-AutoLogin-v1.1.0-android-debug.apk`（90,129 字节），`aapt dump badging` 确认包名 `io.github.shixiangliu.snnulogin`、versionName 1.1.0、versionCode 3、minSdk 26、targetSdk 37，`apksigner verify` 为 Android Debug 证书 |
+| Lint 与设备矩阵 | **本机未验证**：`lintDebug`、`assembleBenchmark` 与 API 26/33–37 模拟器矩阵交由 `.github/workflows/android.yml` 验收 |
 | 真实 Wi-Fi 切换 | 开发期间**未做任何真实连接或断网动作**，连接调用只以打桩与静态审查为准 |
 
 新增清单权限 `CHANGE_WIFI_STATE`（正常权限，无运行时弹窗）；未申请定位权限，也未申请 `NEARBY_WIFI_DEVICES`。
@@ -78,4 +94,5 @@
 
 - Lint 是否接受新增权限、以及 `WifiConfiguration`（API 29 起弃用）这条旧路径；两处 API 级别判断都写在方法内部。
 - API 26–28 的旧接口路径与 API 29+ 的系统建议路径在真机上的实际效果：系统可能延迟或忽略建议，用户也能在系统设置里撤销。
+- 「无无线关联 + 无蜂窝」时请求连接 SNNU 的真实效果：`addNetworkSuggestions` 在没有任何 Wi-Fi 关联时是否会被系统采纳，只能真机确认。
 - 未申请定位权限时 `WifiInfo.getSSID()` 的返回（官方文档为 `<unknown ssid>`）：此时跳过「已连学校网络」判断并照常尝试连接，需要一次真机确认。

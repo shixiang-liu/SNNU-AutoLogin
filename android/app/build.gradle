@@ -15,8 +15,9 @@ android {
         minSdk 26
         targetSdk 37
         // 1 is already used by local test builds; keep monotonic so updates install over them.
-        versionCode 2
-        versionName '1.0.0'
+        // 3 follows the desktop release number so one version number covers every platform build.
+        versionCode 3
+        versionName '1.1.0'
         testInstrumentationRunner 'io.github.shixiangliu.snnulogin.SmokeInstrumentation'
     }
     signingConfigs {
@@ -30,9 +31,10 @@ android {
         }
     }
     buildTypes {
+        // No applicationIdSuffix: this build ships under the release package name, so an installed
+        // debug APK is a drop-in for the release one. It is signed with the debug key, and the two
+        // builds can no longer coexist on one device.
         debug {
-            applicationIdSuffix '.debug'
-            versionNameSuffix '-test'
         }
         release {
             minifyEnabled true

@@ -3,11 +3,20 @@ package io.github.shixiangliu.snnulogin;
 import java.util.function.BooleanSupplier;
 
 /**
- * Dropped-connection self-heal, decision only. Same semantics as decide() in the Windows client
- * (src/windows_wifi.rs): an unreachable portal alone is never a reason to touch Wi-Fi -- the
- * device must also have no external network and must not already be on the campus Wi-Fi.
- * The three facts arrive as lazily evaluated suppliers, so a decision never probes for a fact it
- * does not need. No Android type is referenced here, which keeps the rule verifiable offline.
+ * Dropped-connection self-heal, decision only. The rule is the one the Windows client implements in
+ * src/wifi_heal_core.rs: an unreachable portal alone is never a reason to touch Wi-Fi -- the network
+ * the device is actually on must also be unusable, and the device must not already be on the campus
+ * Wi-Fi. A device that is online through some other working network is left alone.
+ *
+ * Android differs from the desktop in one place: a phone usually has a second egress (cellular).
+ * The desktop can only ask "is there a Wi-Fi association or a cable"; when neither exists the
+ * internet verdict can only come from a TUN/virtual adapter, so it keeps trying to reconnect. On a
+ * phone, no Wi-Fi association plus a validated mobile network is a real, user-chosen egress, so the
+ * answer is the opposite: leave it alone. Both branches are expressed here so the platform
+ * difference is visible in one place.
+ *
+ * The facts arrive as lazily evaluated suppliers, so a decision never probes for a fact it does not
+ * need. No Android type is referenced here, which keeps the rule verifiable offline.
  */
 public final class WifiSelfHeal {
     private WifiSelfHeal() {}
@@ -20,9 +29,10 @@ public final class WifiSelfHeal {
 
     /**
      * 不动作的原因，与 Windows 版 Skip 逐项对应。手机没有可判定的有线校园链路，
-     * 因此 Windows 版的 Wired（有线在线，不干预无线）在这一版没有对应项。
+     * 因此 Windows 版的 Wired（有线在线，不干预无线）在这一版没有对应项；
+     * 取而代之的是 MOBILE_NETWORK：手机自己的出口可用（蜂窝等），用户在用流量，不去抢。
      */
-    public enum Skip { DISABLED, INTERNET_UP, PORTAL_OK, ON_TARGET_SSID }
+    public enum Skip { DISABLED, INTERNET_UP, PORTAL_OK, ON_TARGET_SSID, MOBILE_NETWORK }
 
     /** 纯决策结论。 */
     public enum Decision { SKIP, CONNECT }
@@ -39,14 +49,26 @@ public final class WifiSelfHeal {
     private static Plan skip(Skip reason) { return new Plan(Decision.SKIP, reason); }
 
     /**
-     * 三条件门控：外网不可达、门户不可达、又没连在学校无线网上，三条同时成立才允许连接。
+     * 决策入口。两条分支对应「设备此刻挂在哪种网络上」：
+     *
+     * 连着某个 Wi-Fi 时（onWifi=true）——与 Windows 版同序：经这张 Wi-Fi 的外网探测还通，
+     * 说明网络本身可用，门户一时的故障不该动 Wi-Fi；门户可达同理；已经连在 SNNU 上则无需重复连接。
+     *
+     * 没有任何 Wi-Fi 关联时（onWifi=false）——没有无线出口可探测，于是问手机自己的出口
+     * （otherNetworkUp，即蜂窝等默认网络）。可用就说明用户正靠流量上网，绝不去抢；
+     * 一点出口都没有才是「连接的网络不可用」，此时应当尝试连回学校网络。
+     *
      * enabled 是总开关，在 Android 上就是「自动登录」。判断顺序与短路行为同 Windows 版，
      * 因此被跳过的分支一个探测都不会做。
      */
-    public static Plan decide(boolean enabled, BooleanSupplier internetUp,
-            BooleanSupplier portalReachable, BooleanSupplier onTargetWifi) {
+    public static Plan decide(boolean enabled, BooleanSupplier onWifi, BooleanSupplier internetUp,
+            BooleanSupplier portalReachable, BooleanSupplier onTargetWifi, BooleanSupplier otherNetworkUp) {
         if (!enabled) return skip(Skip.DISABLED);
-        // 条件 1：外网还能上就不是「本身没网」，门户一时的故障不该动 Wi-Fi
+        if (!onWifi.getAsBoolean()) {
+            // 没有无线出口：外网与门户都无从探测（供应商也不会被调用），只看手机自己的出口。
+            return otherNetworkUp.getAsBoolean() ? skip(Skip.MOBILE_NETWORK) : CONNECT;
+        }
+        // 条件 1：这张 Wi-Fi 的外网还能上就不是「连接的网络不可用」，门户一时的故障不该动 Wi-Fi
         if (internetUp.getAsBoolean()) return skip(Skip.INTERNET_UP);
         if (portalReachable.getAsBoolean()) return skip(Skip.PORTAL_OK);
         // 条件 3：已经连在学校无线网上，重复连接没有意义
