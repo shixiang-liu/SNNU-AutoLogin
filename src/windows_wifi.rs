@@ -1,19 +1,16 @@
-// Windows Wi-Fi 自愈：只有“本身没网、门户也不可达、又不在校园网里”三条同时成立，
-// 才把 Wi-Fi 连回学校网络。只连系统里已经保存的配置，不新建配置、不改系统设置。
-//
+// Windows 侧 Wi-Fi 自愈适配：netsh 只读探测 + netsh 连接动作。
+// 三条件决策、连接冷却与日志都在 crate::wifi_heal_core，本模块只负责“问 netsh”。
 // 条件 1：外部互联网不可用（只是门户不可达不算，门户自身故障时绝不动 Wi-Fi）
 // 条件 2：门户探测失败
 // 条件 3：没有有线在线，且当前 Wi-Fi 不是目标学校网络
 // 三条都成立后还要确认目标网络真的在范围内，免得在校外每轮都发一次注定失败的连接。
-// 三条条件都由调用方注入探测函数，本模块只做决策与 netsh 调用，测试全部打桩。
-
+use crate::wifi_heal_core::{split_key_value, ConnectReq, ProfileState, WifiAdapter};
+pub use crate::wifi_heal_core::{target_ssid, DEFAULT_SSID};
+#[cfg(test)]
+use crate::wifi_heal_core::{HealState, Outcome};
 use std::process::Stdio;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-/// 学校 Wi-Fi 的默认名称
-pub const DEFAULT_SSID: &str = "SNNU";
 /// 有线接口名关键字。只认“以太网 / ethernet”：老命名“本地连接 / Local Area Connection”
 /// 不识别是有意为之——Wi-Fi Direct 虚拟网卡也叫“本地连接* N”，与下面的虚拟网卡关键字
 /// 无法区分，误判成有线会让自愈彻底失效。
@@ -29,13 +26,8 @@ const VIRTUAL_KEYS: [&str; 8] = [
     "bluetooth",
     "tap",
 ];
-/// 两次连接动作之间的最小间隔，避免每轮巡检都去连接
-const CONNECT_COOLDOWN: Duration = Duration::from_secs(60);
-/// 发起连接后等待门户可达的轮数（每轮 1 秒间隔加一次门户探测）
-const RECHECK_ROUNDS: u32 = 6;
 /// netsh 单次调用上限：超时按探测失败处理，一次卡住的调用不能拖住整个巡检
 const NETSH_TIMEOUT: Duration = Duration::from_secs(8);
-
 /// netsh 执行入口：测试注入打桩实现，生产用 SystemCmd
 pub trait Cmd {
     /// 执行一条 netsh 子命令；退出码为 0 时返回输出文本，否则返回 None
@@ -74,16 +66,56 @@ impl Cmd for SystemCmd {
     }
 }
 
-/// 有界等待子进程结束：超时返回 false，由调用方负责收尾
-fn wait_bounded(child: &mut std::process::Child, limit: Duration) -> bool {
-    let deadline = Instant::now() + limit;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => return true,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
-            _ => return false,
+/// 把 netsh 注入入口接到共享决策核心：netsh 没有“不支持”语义，失败即失败
+struct NetshProbe<'a>(&'a dyn Cmd);
+
+impl WifiAdapter for NetshProbe<'_> {
+    fn wired_connected(&self) -> bool {
+        wired_connected(self.0)
+    }
+    fn current_ssid(&self) -> Option<String> {
+        current_wifi_ssid(self.0)
+    }
+    fn target_visible(&self, ssid: &str) -> bool {
+        target_visible(self.0, ssid)
+    }
+    fn profile_saved(&self, ssid: &str) -> ProfileState {
+        if profile_saved(self.0, ssid) {
+            ProfileState::Saved
+        } else {
+            ProfileState::Missing
         }
     }
+    fn connect_saved(&self, ssid: &str) -> ConnectReq {
+        if connect_saved(self.0, ssid) {
+            ConnectReq::Requested
+        } else {
+            ConnectReq::Failed
+        }
+    }
+}
+
+impl WifiAdapter for SystemCmd {
+    fn wired_connected(&self) -> bool {
+        NetshProbe(self as &dyn Cmd).wired_connected()
+    }
+    fn current_ssid(&self) -> Option<String> {
+        NetshProbe(self as &dyn Cmd).current_ssid()
+    }
+    fn target_visible(&self, ssid: &str) -> bool {
+        NetshProbe(self as &dyn Cmd).target_visible(ssid)
+    }
+    fn profile_saved(&self, ssid: &str) -> ProfileState {
+        NetshProbe(self as &dyn Cmd).profile_saved(ssid)
+    }
+    fn connect_saved(&self, ssid: &str) -> ConnectReq {
+        NetshProbe(self as &dyn Cmd).connect_saved(ssid)
+    }
+}
+
+/// 有界等待子进程结束：实现见共享核心，两个平台共用同一套收尾逻辑
+fn wait_bounded(child: &mut std::process::Child, limit: Duration) -> bool {
+    crate::wifi_heal_core::wait_bounded(child, limit)
 }
 
 /// netsh 按控制台代码页输出（中文系统是 GBK）：先严格按 UTF-8，失败再按 GB18030
@@ -175,14 +207,6 @@ fn ssid_entry_key(key: &str) -> bool {
     }
 }
 
-/// 按首个冒号切出“键 : 值”（中文输出也可能是全角冒号），值已去空白
-fn split_key_value(line: &str) -> Option<(&str, &str)> {
-    let line = line.trim();
-    let at = line.find([':', '：'])?;
-    let sep = line[at..].chars().next()?;
-    Some((line[..at].trim(), line[at + sep.len_utf8()..].trim()))
-}
-
 /// 系统里是否保存过该 Wi-Fi 配置
 fn profile_saved(cmd: &dyn Cmd, ssid: &str) -> bool {
     let out = cmd.netsh(&["wlan", "show", "profiles"]).unwrap_or_default();
@@ -204,101 +228,8 @@ fn connect_saved(cmd: &dyn Cmd, ssid: &str) -> bool {
     cmd.netsh(&["wlan", "connect", arg.as_str()]).is_some()
 }
 
-/// 自愈目标 SSID：配置留空时按默认学校 Wi-Fi
-pub fn target_ssid(cfg: &crate::config::Config) -> String {
-    let ssid = cfg.ssid.trim();
-    if ssid.is_empty() {
-        DEFAULT_SSID.to_string()
-    } else {
-        ssid.to_string()
-    }
-}
-
-/// 不动作的原因
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Skip {
-    /// 自愈开关关闭
-    Disabled,
-    /// 外网还能上：这是门户自己的问题，只等门户恢复，不动 Wi-Fi
-    InternetUp,
-    /// 门户可达，不需要自愈
-    PortalOk,
-    /// 有线在线，不干预 Wi-Fi
-    Wired,
-    /// 已经连在目标 Wi-Fi 上，重复连接没有意义
-    OnTarget,
-}
-
-/// 纯决策结论
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Decision {
-    Skip(Skip),
-    Connect,
-}
-
-/// 一轮巡检实际做了什么
-#[derive(Clone, PartialEq, Eq, Debug)]
-enum Outcome {
-    /// 按决策不动作
-    Idle(Skip),
-    /// 距上次连接动作不足冷却时间
-    Cooldown,
-    /// 附近看不到目标 Wi-Fi，本轮不连接
-    NotVisible(String),
-    /// 系统没有保存目标 Wi-Fi 配置，放弃
-    NoProfile(String),
-    /// 系统没有连上，连接请求被拒
-    ConnectFailed(String),
-    /// 已请求连接，portal_ok 是随后的门户复检结果
-    Connected { ssid: String, portal_ok: bool },
-}
-
-/// 纯决策：三个条件都成立才允许连接。事实用闭包传入，用不到的时候一个探测都不做。
-fn decide(
-    enabled: bool,
-    internet_ok: impl FnOnce() -> bool,
-    portal_ok: impl FnOnce() -> bool,
-    wired: impl FnOnce() -> bool,
-    on_target_wifi: impl FnOnce() -> bool,
-) -> Decision {
-    if !enabled {
-        return Decision::Skip(Skip::Disabled);
-    }
-    // 条件 1：外网还能上就不是“本身没网”，门户故障不该动 Wi-Fi
-    if internet_ok() {
-        return Decision::Skip(Skip::InternetUp);
-    }
-    if portal_ok() {
-        return Decision::Skip(Skip::PortalOk);
-    }
-    // 条件 3：有线在线或已经连在学校 Wi-Fi 上都算在校园网里
-    if wired() {
-        return Decision::Skip(Skip::Wired);
-    }
-    if on_target_wifi() {
-        return Decision::Skip(Skip::OnTarget);
-    }
-    Decision::Connect
-}
-
-/// 常驻循环持有的巡检状态：连接动作冷却，加同一结论只记一次日志
-#[derive(Default)]
-pub struct HealState {
-    last_attempt: Option<Instant>,
-    last: Option<Outcome>,
-}
-
-impl HealState {
-    /// 距离上次连接动作是否还在冷却期内
-    fn cooling(&self, now: Instant) -> bool {
-        self.last_attempt
-            .is_some_and(|at| now.duration_since(at) < CONNECT_COOLDOWN)
-    }
-}
-
-/// 门户不可达时巡检一次。探测与等待全部由调用方注入：
-/// internet_ok 是条件 1 的外部网络探测，portal_ok 是条件 2 的结论（挂点就在不可达分支里），
-/// recheck 是连接之后的门户复检，wait 是复检之间的等待。
+/// 打桩巡检入口：把 netsh 探测接到共享决策核心上（生产路径走核心的挂点）
+#[cfg(test)]
 fn heal(
     cfg: &crate::config::Config,
     cmd: &dyn Cmd,
@@ -308,118 +239,21 @@ fn heal(
     wait: &mut dyn FnMut(Duration),
     recheck: &mut dyn FnMut() -> bool,
 ) -> Outcome {
-    let target = target_ssid(cfg);
-    let decision = decide(
-        cfg.wifi_self_heal,
-        || internet_ok(),
-        || portal_ok,
-        || wired_connected(cmd),
-        || current_wifi_ssid(cmd).as_deref() == Some(target.as_str()),
-    );
-    let outcome = match decision {
-        Decision::Skip(skip) => Outcome::Idle(skip),
-        Decision::Connect => attempt(cmd, &target, state, wait, recheck),
-    };
-    record(state, &outcome);
-    outcome
-}
-
-/// 连接动作：没有保存目标 Wi-Fi 就放弃，有保存就连过去并复检门户
-fn attempt(
-    cmd: &dyn Cmd,
-    target: &str,
-    state: &mut HealState,
-    wait: &mut dyn FnMut(Duration),
-    recheck: &mut dyn FnMut() -> bool,
-) -> Outcome {
-    if state.cooling(Instant::now()) {
-        return Outcome::Cooldown;
-    }
-    state.last_attempt = Some(Instant::now());
-    // 校外没有目标网络时连接只会白试：跳过也占用冷却，扫描最多每分钟一次
-    if !target_visible(cmd, target) {
-        return Outcome::NotVisible(target.to_string());
-    }
-    if connect_saved(cmd, target) {
-        let mut portal_ok = false;
-        for _ in 0..RECHECK_ROUNDS {
-            wait(Duration::from_secs(1));
-            if recheck() {
-                portal_ok = true;
-                break;
-            }
-        }
-        Outcome::Connected {
-            ssid: target.to_string(),
-            portal_ok,
-        }
-    } else if profile_saved(cmd, target) {
-        Outcome::ConnectFailed(target.to_string())
-    } else {
-        Outcome::NoProfile(target.to_string())
-    }
-}
-
-/// 同一结论只记一次日志，避免掉线期间每轮巡检都刷屏
-fn record(state: &mut HealState, outcome: &Outcome) {
-    if state.last.as_ref() == Some(outcome) {
-        return;
-    }
-    state.last = Some(outcome.clone());
-    let msg = match outcome {
-        Outcome::Idle(Skip::InternetUp) => "外网可通、门户不可达，不切换 Wi-Fi".to_string(),
-        Outcome::Idle(Skip::Wired) => "有线在线，不干预 Wi-Fi".to_string(),
-        Outcome::Idle(Skip::OnTarget) => "已经连在目标 Wi-Fi 上，无需自愈".to_string(),
-        Outcome::NotVisible(ssid) => format!("附近看不到 {} 网络，本轮不连接", ssid),
-        Outcome::NoProfile(ssid) => format!("系统未保存 {} 配置，放弃自动连接 Wi-Fi", ssid),
-        Outcome::ConnectFailed(ssid) => format!("连接 {} 未成功，稍后重试", ssid),
-        Outcome::Connected { ssid, portal_ok } => format!(
-            "本身无网、门户不可达且没连 {}，已请求连接；门户复检{}",
-            ssid,
-            if *portal_ok {
-                "已可达"
-            } else {
-                "仍不可达"
-            }
-        ),
-        Outcome::Idle(Skip::Disabled) | Outcome::Idle(Skip::PortalOk) | Outcome::Cooldown => {
-            return;
-        }
-    };
-    crate::config::logf(&msg);
-}
-
-/// 门户不可达分支的挂点：三条条件同时成立才把 Wi-Fi 连回学校网络
-pub fn heal_on_unreachable(
-    cfg: &crate::config::Config,
-    state: &mut HealState,
-    quit: &Arc<AtomicBool>,
-    wake: &Arc<AtomicBool>,
-) {
-    let cmd = SystemCmd;
-    let mut internet_ok = crate::portal::internet_ok;
-    let mut wait = |gap: Duration| crate::agent::sleep(gap.as_secs().max(1), quit, wake);
-    let mut recheck = || {
-        !matches!(
-            crate::portal::status(Duration::from_secs(3)).0,
-            crate::portal::Status::Unreachable
-        )
-    };
-    let _ = heal(
+    crate::wifi_heal_core::heal(
         cfg,
-        &cmd,
-        // 这个挂点本身就在“门户不可达”分支里，条件 2 已经由调度循环确认过
-        false,
+        &NetshProbe(cmd),
+        portal_ok,
         state,
-        &mut internet_ok,
-        &mut wait,
-        &mut recheck,
-    );
+        internet_ok,
+        wait,
+        recheck,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wifi_heal_core::{decide, Decision, Skip};
     use std::cell::RefCell;
     use std::collections::HashMap;
 
