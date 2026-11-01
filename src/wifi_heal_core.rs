@@ -252,11 +252,22 @@ fn record(state: &mut HealState, outcome: &Outcome) {
                 "仍不可达"
             }
         ),
+        // 开关关闭与门户可达是常态，不值得写日志；冷却说明上一轮刚动作过，也不写。
         Outcome::Idle(Skip::Disabled) | Outcome::Idle(Skip::PortalOk) | Outcome::Cooldown => {
             return;
         }
     };
     crate::config::logf(&msg);
+}
+
+/// 「外网可通」能不能当作不动 Wi-Fi 的理由。
+///
+/// 只有已经落在某条网络上时才算数：外网通 + 有线在线，或外网通 + 连着某个 Wi-Fi，
+/// 那才是"在校园网里门户自己故障"，等门户恢复即可。
+/// 完全没有任何关联（没连 Wi-Fi、没插网线）时，外网只能来自 TUN / 虚拟网卡一类，
+/// 说明机器根本没连回学校网络，此时干等是错的，应该继续尝试连回。
+pub fn internet_gate(internet_ok: bool, has_wifi: bool, wired: bool) -> bool {
+    internet_ok && (has_wifi || wired)
 }
 
 /// 门户不可达分支的挂点：三条条件同时成立才把 Wi-Fi 连回学校网络
@@ -273,7 +284,19 @@ pub fn heal_on_unreachable(
     let probe = crate::macos::wifi_heal::SystemCmd;
     #[cfg(target_os = "linux")]
     let probe = crate::linux::wifi::SystemCmd;
-    let mut internet_ok = crate::portal::internet_ok;
+    // 中途掉线且没有任何关联时，别的出口（TUN、虚拟网卡）仍可能让外网探测通过；
+    // 这种"外网可通"不能当成不动 Wi-Fi 的理由，否则界面会一直停在「等待校园网」。
+    let mut internet_ok = || {
+        // 先问外网：不通就没有后面两次 netsh，常态下不多花一次调用。
+        if !crate::portal::internet_ok() {
+            return false;
+        }
+        internet_gate(
+            true,
+            probe.current_ssid().is_some(),
+            probe.wired_connected(),
+        )
+    };
     let mut wait = |gap: Duration| crate::agent::sleep(gap.as_secs().max(1), quit, wake);
     let mut recheck = || {
         !matches!(
@@ -664,6 +687,22 @@ mod tests {
         assert!(stub.asked.borrow().contains(&"connect"), "{:?}", stub.asked);
         assert_eq!(waits, 2);
         assert_eq!(probes, 2);
+    }
+
+    /// 中途掉线、机器上既没 Wi-Fi 也没网线时，别的出口让外网探测通过也不能当成"在校园网里"。
+    #[test]
+    fn 完全没有任何关联时外网可通不算在校园网里() {
+        // 有 Wi-Fi 关联或网线在线：外网可通就是在校园网里，等门户恢复即可。
+        assert!(internet_gate(true, true, false));
+        assert!(internet_gate(true, false, true));
+        // 什么都没有：外网只可能来自 TUN/虚拟网卡，必须继续尝试连回。
+        assert!(!internet_gate(true, false, false));
+        // 外网本来就不通：与有没有关联无关，照常进入自愈判断。
+        for has_wifi in [false, true] {
+            for wired in [false, true] {
+                assert!(!internet_gate(false, has_wifi, wired));
+            }
+        }
     }
 
     #[test]

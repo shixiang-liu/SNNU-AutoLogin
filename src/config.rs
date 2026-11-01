@@ -263,6 +263,11 @@ fn update_state_at(path: &Path, f: impl FnOnce(&mut State)) -> std::io::Result<(
 }
 
 pub fn logf(msg: &str) {
+    // 单测会跑真实的巡检决策，结论不能写进用户的 login.log，否则现场日志不可读。
+    #[cfg(test)]
+    if std::env::var_os("SNNU_TEST_LOG").is_none() {
+        return;
+    }
     use std::io::Write;
     let _ = fs::create_dir_all(app_dir());
     if let Ok(meta) = fs::metadata(log_path()) {
