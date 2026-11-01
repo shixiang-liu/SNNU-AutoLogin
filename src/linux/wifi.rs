@@ -11,7 +11,8 @@
 // nmcli 缺失时（降级路径）探针只给保守答案：没连无线、没有有线在线、读不到已保存配置，
 // 连接动作归 UNSUPPORTED 并写日志，绝不新建或改动 NetworkManager 里的任何配置。
 use crate::wifi_heal_core::{ConnectReq, ProfileState, WifiAdapter};
-pub use crate::wifi_heal_core::{target_ssid, DEFAULT_SSID};
+// 默认学校网络名与目标 SSID 都只由共享核心定义；这里只重导出生产代码用得到的那个
+pub use crate::wifi_heal_core::target_ssid;
 use std::process::Stdio;
 
 /// 有线接口名关键字（Linux 命名：eth0 / enp3s0 / eno1 / ens18 / enx…）
@@ -817,7 +818,7 @@ mod tests {
     fn 配置默认开启自愈且默认连学校网络() {
         let cfg: crate::config::Config = serde_json::from_str("{}").unwrap();
         assert!(cfg.wifi_self_heal);
-        assert_eq!(cfg.ssid, DEFAULT_SSID);
+        assert_eq!(cfg.ssid, core::DEFAULT_SSID);
         let cfg: crate::config::Config =
             serde_json::from_str(r#"{"wifi_self_heal":false,"ssid":"SNNU-Guest"}"#).unwrap();
         assert!(!cfg.wifi_self_heal);
@@ -826,7 +827,7 @@ mod tests {
 
     #[test]
     fn 目标名称留空时回到默认学校网络() {
-        assert_eq!(target_ssid(&cfg(true, "  ")), DEFAULT_SSID);
+        assert_eq!(target_ssid(&cfg(true, "  ")), core::DEFAULT_SSID);
         assert_eq!(target_ssid(&cfg(true, "SNNU-Guest")), "SNNU-Guest");
     }
 }
