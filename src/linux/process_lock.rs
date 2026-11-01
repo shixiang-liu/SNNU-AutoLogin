@@ -82,7 +82,8 @@ mod tests {
 
     #[test]
     fn 同线程可重入而其他线程互斥() {
-        let path = std::env::temp_dir().join(format!("snnu-linux-recursive-{}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("snnu-linux-recursive-{}", std::process::id()));
         let outer = ProcessLock::acquire(&path, Duration::ZERO).unwrap();
         let inner = ProcessLock::acquire(&path, Duration::ZERO).unwrap();
         drop(inner);

@@ -51,7 +51,9 @@ pub fn enabled() -> bool {
 pub fn enable() -> Result<(), String> {
     systemctl(&["--user", "enable", UNIT])
         .map(|_| ())
-        .ok_or_else(|| format!("未能启用 {UNIT}：请在有 systemd 的会话里执行 systemctl --user enable {UNIT}"))
+        .ok_or_else(|| {
+            format!("未能启用 {UNIT}：请在有 systemd 的会话里执行 systemctl --user enable {UNIT}")
+        })
 }
 
 pub fn disable() -> Result<(), String> {

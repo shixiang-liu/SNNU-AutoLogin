@@ -3,8 +3,8 @@ use crate::agent;
 use crate::config;
 use crate::linux::wifi::Cmd;
 use crate::linux::{storage, wifi};
-use crate::{autostart, network};
 use crate::portal::{self, Status};
+use crate::{autostart, network};
 use std::io::{BufRead, IsTerminal, Write};
 use std::time::Duration;
 
@@ -154,7 +154,9 @@ fn setup(has: &dyn Fn(&str) -> bool, value: &dyn Fn(&str) -> Option<String>) -> 
         }
     );
     println!("配置　　{}", config::cfg_path().display());
-    println!("后台未运行时已自动拉起；systemd 用户服务里用 systemctl --user restart snnulogin 让它重读");
+    println!(
+        "后台未运行时已自动拉起；systemd 用户服务里用 systemctl --user restart snnulogin 让它重读"
+    );
     0
 }
 

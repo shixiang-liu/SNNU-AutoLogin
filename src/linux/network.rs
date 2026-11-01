@@ -75,7 +75,8 @@ pub fn spawn_net_watch(wake: Arc<AtomicBool>) {
 mod tests {
     use super::*;
 
-    const ROUTE: &str = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n\
+    const ROUTE: &str =
+        "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n\
 eth0\t00000000\t0100A8C0\t0003\t0\t0\t0\t00000000\t\t0\t0\t0\n\
 wlan0\t0000A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t\t0\t0\t0\n";
 
@@ -99,7 +100,10 @@ wlan0\t0000A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t\t0\t0\t0\n";
         }
         // 有 /sys/class/net 的环境至少要能读出 loopback
         if !snapshot.is_empty() {
-            assert!(snapshot.lines().any(|line| line.starts_with("lo ")), "{snapshot}");
+            assert!(
+                snapshot.lines().any(|line| line.starts_with("lo ")),
+                "{snapshot}"
+            );
         }
     }
 }

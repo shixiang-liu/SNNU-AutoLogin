@@ -222,8 +222,9 @@ fn parse_current_ssid(text: &str) -> Option<String> {
 /// 解析 nmcli -t -f NAME,TYPE connection show：名称整值相等，且必须是无线配置
 fn parse_profile_has(text: &str, ssid: &str) -> bool {
     text.lines().any(|line| {
-        split_terse(line)
-            .is_some_and(|(name, kind)| name == ssid && matches!(kind.as_str(), "802-11-wireless" | "wifi"))
+        split_terse(line).is_some_and(|(name, kind)| {
+            name == ssid && matches!(kind.as_str(), "802-11-wireless" | "wifi")
+        })
     })
 }
 
