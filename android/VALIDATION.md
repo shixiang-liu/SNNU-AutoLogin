@@ -59,3 +59,23 @@
 - 厂商自有电池开关是否放行后台：应用读不到，只能以系统页面为准。当前测试包已获 Android 省电豁免，系统后台限制为允许。
 - 锁屏、Doze、重启首次解锁后的恢复，以及长时间耗电；厂商自启动开关同样无法读取。
 - 欠费、套餐超限、验证码等真实账号异常场景，以及其他品牌机型。
+
+## Wi-Fi 自愈（本轮新增，待 CI 与真机验收）
+
+2026-11-01，分支 `feature/android-self-heal`。与 Windows 版 `src/windows_wifi.rs` 的 `decide()` 同语义：外网不可达、门户不可达、又没连在 SNNU 上，三条同时成立才请求连接学校 Wi-Fi——只是门户故障时不换 Wi-Fi。挂点在门户不可达分支（`LoginService.tick()` 的 `Kind.UNREACHABLE`）；决策是纯 Java（`WifiSelfHeal`），系统调用单独一层（`WifiHealer`）。
+
+| 检查 | 结果 |
+| --- | --- |
+| 纯决策类 + 离线 JUnit | `WifiSelfHealTest` **11 项通过、0 失败**（javac + JUnit 4.13.2，**未加载 android.jar**，证明决策类没有 Android 依赖） |
+| 既有离线测试零回归 | 既有 **85 项**复跑全过：ConnectionPolicy 6、PortalProtocol 17、PortalClient 14、AccountUpdate 10、ConnectionInspection 3、UiModel 29、SystemSettingsState 6 |
+| Android 组装层可编译 | `WifiHealer` 与 `LoginService` 的改动用 android.jar（API 36 平台桩）+ 最小 R/BuildConfig 桩编译通过 |
+| 真机构建、Lint、设备矩阵 | **本机未验证**：本机没有 Android SDK，无法执行 `gradlew testDebugUnitTest lintDebug assembleBenchmark`；交由 `.github/workflows/android.yml`（含 API 26 与 API 33–37 模拟器矩阵）验收 |
+| 真实 Wi-Fi 切换 | 开发期间**未做任何真实连接或断网动作**，连接调用只以打桩与静态审查为准 |
+
+新增清单权限 `CHANGE_WIFI_STATE`（正常权限，无运行时弹窗）；未申请定位权限，也未申请 `NEARBY_WIFI_DEVICES`。
+
+尚待验收：
+
+- Lint 是否接受新增权限、以及 `WifiConfiguration`（API 29 起弃用）这条旧路径；两处 API 级别判断都写在方法内部。
+- API 26–28 的旧接口路径与 API 29+ 的系统建议路径在真机上的实际效果：系统可能延迟或忽略建议，用户也能在系统设置里撤销。
+- 未申请定位权限时 `WifiInfo.getSSID()` 的返回（官方文档为 `<unknown ssid>`）：此时跳过「已连学校网络」判断并照常尝试连接，需要一次真机确认。
