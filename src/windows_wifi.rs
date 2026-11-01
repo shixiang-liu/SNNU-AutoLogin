@@ -4,7 +4,7 @@
 // 条件 2：门户探测失败
 // 条件 3：没有有线在线，且当前 Wi-Fi 不是目标学校网络
 // 三条都成立后还要确认目标网络真的在范围内，免得在校外每轮都发一次注定失败的连接。
-use crate::wifi_heal_core::{split_key_value, ConnectReq, ProfileState, WifiAdapter};
+use crate::wifi_heal_core::{split_key_value, AssocState, ConnectReq, ProfileState, WifiAdapter};
 pub use crate::wifi_heal_core::{target_ssid, DEFAULT_SSID};
 #[cfg(test)]
 use crate::wifi_heal_core::{HealState, Outcome};
@@ -93,6 +93,9 @@ impl WifiAdapter for NetshProbe<'_> {
             ConnectReq::Failed
         }
     }
+    fn association(&self, ssid: &str) -> AssocState {
+        association(self.0, ssid)
+    }
 }
 
 impl WifiAdapter for SystemCmd {
@@ -110,6 +113,9 @@ impl WifiAdapter for SystemCmd {
     }
     fn connect_saved(&self, ssid: &str) -> ConnectReq {
         NetshProbe(self as &dyn Cmd).connect_saved(ssid)
+    }
+    fn association(&self, ssid: &str) -> AssocState {
+        NetshProbe(self as &dyn Cmd).association(ssid)
     }
 }
 
@@ -177,6 +183,36 @@ fn parse_current_ssid(text: &str) -> Option<String> {
         }
         Some(value.to_string())
     })
+}
+
+/// 解析 netsh wlan show interfaces 的「状态 / State」行：已连接为 true，断开为 false。
+/// 中文「已断开连接」含「已连接」，英文 Disconnected 含 Connected，必须先排除断开。
+fn parse_interface_connected(text: &str) -> Option<bool> {
+    text.lines().find_map(|line| {
+        let (key, value) = split_key_value(line)?;
+        if !(key == "状态" || key.eq_ignore_ascii_case("state")) {
+            return None;
+        }
+        let lower = value.to_lowercase();
+        if lower.contains("断开") || lower.contains("disconnected") {
+            return Some(false);
+        }
+        Some(lower.contains("已连接") || lower.contains("connected"))
+    })
+}
+
+/// 与目标网络的关联状态：接口已连接且 SSID 是目标网络才算关联完成。
+/// 读不到 netsh 输出时返回 Unknown，由调用方按原有流程直接复检门户。
+pub fn association(cmd: &dyn Cmd, ssid: &str) -> AssocState {
+    let Some(out) = cmd.netsh(&["wlan", "show", "interfaces"]) else {
+        return AssocState::Unknown;
+    };
+    match parse_interface_connected(&out) {
+        Some(true) if parse_current_ssid(&out).as_deref() == Some(ssid) => AssocState::Connected,
+        // 已连接但连的是别的网络，或者还停在断开：都当作关联尚未完成
+        Some(_) => AssocState::Pending,
+        None => AssocState::Unknown,
+    }
 }
 
 /// 解析 netsh wlan show profiles：已保存的配置文件里是否有这个名称
@@ -253,7 +289,7 @@ fn heal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wifi_heal_core::{decide, Decision, Skip};
+    use crate::wifi_heal_core::{decide, AssocState, Decision, Skip};
     use std::cell::RefCell;
     use std::collections::HashMap;
 
@@ -293,9 +329,11 @@ SSID 2 : SNNU\n\
 SSID 1 : OtherWiFi\n\
     网络类型             : 结构\n";
 
-    /// 打桩 netsh：按子命令给预置输出，并记录被调用过的子命令
+    /// 打桩 netsh：按子命令给预置输出，并记录被调用过的子命令。
+    /// 同一个子命令可以排多份输出（with 之后用 then 追加），按调用顺序依次消费，
+    /// 用来演示“连接前还是别的网络、连接后已经关联到学校网络”。
     struct Stub {
-        output: HashMap<String, String>,
+        output: HashMap<String, Vec<String>>,
         calls: RefCell<Vec<String>>,
     }
 
@@ -308,7 +346,16 @@ SSID 1 : OtherWiFi\n\
         }
 
         fn with(mut self, args: &str, out: &str) -> Self {
-            self.output.insert(args.to_string(), out.to_string());
+            self.output.insert(args.to_string(), vec![out.to_string()]);
+            self
+        }
+
+        /// 同一个子命令的下一次输出：前面几份被消费完之前不会用到它
+        fn then(mut self, args: &str, out: &str) -> Self {
+            self.output
+                .entry(args.to_string())
+                .or_default()
+                .push(out.to_string());
             self
         }
 
@@ -325,7 +372,16 @@ SSID 1 : OtherWiFi\n\
         fn netsh(&self, args: &[&str]) -> Option<String> {
             let key = args.join(" ");
             self.calls.borrow_mut().push(key.clone());
-            self.output.get(&key).cloned()
+            let answers = self.output.get(&key)?;
+            // 排了多份就依次消费，只剩最后一份时重复使用
+            let index = self
+                .calls
+                .borrow()
+                .iter()
+                .filter(|call| **call == key)
+                .count()
+                - 1;
+            Some(answers[index.min(answers.len() - 1)].clone())
         }
     }
 
@@ -573,9 +629,11 @@ Enabled        Disconnected   Dedicated        Ethernet\n"
 
     #[test]
     fn 没网没门户没连学校网络时连接并复检门户() {
+        // 连接前还连在别的网络上，连接后才关联到学校网络
         let stub = Stub::new()
             .with("interface show interface", CN_WIRED_DOWN)
             .with("wlan show interfaces", WLAN_OTHER)
+            .then("wlan show interfaces", WLAN_SNNU)
             .with("wlan show profiles", PROFILES_SNNU)
             .with("wlan show networks", NETWORKS_SNNU)
             .with("wlan connect name=SNNU", "连接请求已完成。\n");
@@ -606,6 +664,81 @@ Enabled        Disconnected   Dedicated        Ethernet\n"
         assert!(stub.called("wlan connect name=SNNU"), "{:?}", stub.all());
         assert_eq!(waits, 2);
         assert_eq!(probes, 2);
+    }
+
+    #[test]
+    fn 接口状态只认状态行并先排除断开() {
+        assert_eq!(parse_interface_connected(WLAN_SNNU), Some(true));
+        assert_eq!(parse_interface_connected(WLAN_OTHER), Some(true));
+        assert_eq!(
+            parse_interface_connected("    状态                   : 已断开连接\n"),
+            Some(false)
+        );
+        assert_eq!(
+            parse_interface_connected("    State                  : disconnected\n"),
+            Some(false)
+        );
+        // 只看“状态/State”行：名称行里出现 Connected 字样不算
+        assert_eq!(
+            parse_interface_connected("    名称                   : WLAN 2\n"),
+            None
+        );
+        assert_eq!(parse_interface_connected(""), None);
+    }
+
+    #[test]
+    fn 关联状态要求接口已连接且ssid是目标() {
+        let cmd = Stub::new().with("wlan show interfaces", WLAN_SNNU);
+        assert_eq!(association(&cmd, "SNNU"), AssocState::Connected);
+        // 已连但连的是别的网络：关联尚未完成
+        let cmd = Stub::new().with("wlan show interfaces", WLAN_OTHER);
+        assert_eq!(association(&cmd, "SNNU"), AssocState::Pending);
+        // 断开着
+        let cmd = Stub::new().with(
+            "wlan show interfaces",
+            "    名称                   : WLAN 2\n    状态                   : 已断开连接\n",
+        );
+        assert_eq!(association(&cmd, "SNNU"), AssocState::Pending);
+        // 读不到 netsh：看不出来，按原流程直接复检
+        let cmd = Stub::new();
+        assert_eq!(association(&cmd, "SNNU"), AssocState::Unknown);
+    }
+
+    #[test]
+    fn 关联没完成时提前失败且不跑门户复检() {
+        // 连接请求发出去了，但接口始终停在别的网络
+        let stub = Stub::new()
+            .with("interface show interface", CN_WIRED_DOWN)
+            .with("wlan show interfaces", WLAN_OTHER)
+            .with("wlan show profiles", PROFILES_SNNU)
+            .with("wlan show networks", NETWORKS_SNNU)
+            .with("wlan connect name=SNNU", "连接请求已完成。\n");
+        let mut state = HealState::default();
+        let mut waits = 0;
+        let mut wait = |_: Duration| waits += 1;
+        let mut recheck = || unreachable();
+        let outcome = heal_stub(
+            &cfg(true, "SNNU"),
+            &stub,
+            false,
+            &mut state,
+            false,
+            &mut wait,
+            &mut recheck,
+        );
+        assert_eq!(outcome, Outcome::ConnectFailed("SNNU".to_string()));
+        // 只花关联预算（10 次 × 2 秒），一次门户复检都不跑
+        assert_eq!(waits, 10);
+        // 决策先问一次当前网络，之后 10 次关联探测，正好 11 次
+        assert_eq!(
+            stub.all()
+                .iter()
+                .filter(|call| **call == "wlan show interfaces")
+                .count(),
+            11,
+            "{:?}",
+            stub.all()
+        );
     }
 
     #[test]
@@ -664,10 +797,11 @@ Enabled        Disconnected   Dedicated        Ethernet\n"
     }
 
     #[test]
-    fn 连接动作有冷却不会每轮都连() {
+    fn 连接成功后已经连在目标网络上不再重复连接() {
         let stub = Stub::new()
             .with("interface show interface", CN_WIRED_DOWN)
             .with("wlan show interfaces", WLAN_OTHER)
+            .then("wlan show interfaces", WLAN_SNNU)
             .with("wlan show profiles", PROFILES_SNNU)
             .with("wlan show networks", NETWORKS_SNNU)
             .with("wlan connect name=SNNU", "连接请求已完成。\n");
@@ -699,7 +833,8 @@ Enabled        Disconnected   Dedicated        Ethernet\n"
             &mut wait,
             &mut recheck,
         );
-        assert_eq!(second, Outcome::Cooldown);
+        // 关联完成后再巡检就是“已经在学校网络上”，不会再发第二次连接
+        assert_eq!(second, Outcome::Idle(Skip::OnTarget));
         assert_eq!(
             stub.all()
                 .iter()

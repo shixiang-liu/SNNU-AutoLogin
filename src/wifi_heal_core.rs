@@ -17,8 +17,13 @@ use std::time::{Duration, Instant};
 pub const DEFAULT_SSID: &str = "SNNU";
 /// 两次连接动作之间的最小间隔，避免每轮巡检都去连接
 const CONNECT_COOLDOWN: Duration = Duration::from_secs(60);
-/// 发起连接后等待门户可达的轮数（每轮 1 秒间隔加一次门户探测）
+/// 关联之后等待门户可达的轮数（每轮 1 秒间隔加一次门户探测）
 const RECHECK_ROUNDS: u32 = 6;
+/// 发起连接后等 Wi-Fi 关联的总预算：实测关联加 DHCP 要 15~30 秒，
+/// 复检必须排在关联之后，否则窗口全烧在还没连上的空等里
+pub const ASSOC_TIMEOUT: Duration = Duration::from_secs(20);
+/// 关联探测的间隔：每 2 秒问一次，10 次正好用满 ASSOC_TIMEOUT
+pub const ASSOC_POLL: Duration = Duration::from_secs(2);
 
 /// 系统里是否保存过目标网络的配置
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -56,6 +61,22 @@ pub trait WifiAdapter {
     fn profile_saved(&self, ssid: &str) -> ProfileState;
     /// 连接系统里已保存的网络
     fn connect_saved(&self, ssid: &str) -> ConnectReq;
+    /// 是否已经关联到目标网络。关联完成才值得复检门户；看不出来的平台返回 Unknown，
+    /// 保持原有“连上就直接复检”的流程。
+    fn association(&self, _ssid: &str) -> AssocState {
+        AssocState::Unknown
+    }
+}
+
+/// 与目标网络的关联状态
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AssocState {
+    /// 已关联，可以复检门户
+    Connected,
+    /// 还没关联上（正在关联、等 DHCP）
+    Pending,
+    /// 平台看不出来，按原流程直接复检
+    Unknown,
 }
 
 /// 不动作的原因
@@ -132,6 +153,9 @@ pub fn decide(
 pub struct HealState {
     last_attempt: Option<Instant>,
     last: Option<Outcome>,
+    /// 上一轮已经把连接请求发出去、门户却还没通：关联随时可能完成，
+    /// 冷却不该继续挡住随后的登录（实测里那 60 秒空转就出在这里）。
+    pending_association: bool,
 }
 
 impl HealState {
@@ -155,6 +179,9 @@ pub fn target_ssid(cfg: &crate::config::Config) -> String {
 /// 门户不可达时巡检一次。探测与等待全部由调用方注入：
 /// internet_ok 是条件 1 的外部网络探测，portal_ok 是条件 2 的结论（挂点就在不可达分支里），
 /// recheck 是连接之后的门户复检，wait 是复检之间的等待。
+///
+/// 生产挂点走 heal_interruptible（退出与网络变化要能打断等待），这里是不关心打断的入口。
+#[allow(dead_code)]
 pub fn heal<A: WifiAdapter>(
     cfg: &crate::config::Config,
     adapter: &A,
@@ -164,7 +191,55 @@ pub fn heal<A: WifiAdapter>(
     wait: &mut dyn FnMut(Duration),
     recheck: &mut dyn FnMut() -> bool,
 ) -> Outcome {
+    heal_interruptible(
+        cfg,
+        adapter,
+        portal_ok,
+        state,
+        internet_ok,
+        wait,
+        recheck,
+        &mut || false,
+    )
+}
+
+/// 同 heal，但等待过程可被 interrupted 打断（退出、网络变化唤醒一类）。
+pub fn heal_interruptible<A: WifiAdapter>(
+    cfg: &crate::config::Config,
+    adapter: &A,
+    portal_ok: bool,
+    state: &mut HealState,
+    internet_ok: &mut dyn FnMut() -> bool,
+    wait: &mut dyn FnMut(Duration),
+    recheck: &mut dyn FnMut() -> bool,
+    interrupted: &mut dyn FnMut() -> bool,
+) -> Outcome {
     let target = target_ssid(cfg);
+    // 上一轮已发出连接但门户没通：关联一旦完成就立刻复检，不再等冷却空转。
+    // 这个解锁机会只给一次，门户仍不通就交回常规决策（此时已经连在目标网络上）。
+    if cfg.wifi_self_heal
+        && state.pending_association
+        && adapter.association(&target) == AssocState::Connected
+    {
+        state.pending_association = false;
+        // 这一轮就是要把登录送出去，复检不再中途收手：被打断等于白等一轮
+        let portal_ok = portal_recheck(wait, recheck, &mut || false);
+        crate::config::logf(&format!(
+            "{} 已关联完成，门户复检{}（未等连接冷却）",
+            target,
+            if portal_ok {
+                "已可达"
+            } else {
+                "仍不可达"
+            }
+        ));
+        let outcome = Outcome::Connected {
+            ssid: target.clone(),
+            portal_ok,
+        };
+        state.last = Some(outcome.clone());
+        return outcome;
+    }
     let decision = decide(
         cfg.wifi_self_heal,
         || internet_ok(),
@@ -174,7 +249,7 @@ pub fn heal<A: WifiAdapter>(
     );
     let outcome = match decision {
         Decision::Skip(skip) => Outcome::Idle(skip),
-        Decision::Connect => attempt(adapter, &target, state, wait, recheck),
+        Decision::Connect => attempt(adapter, &target, state, wait, recheck, interrupted),
     };
     record(state, &outcome);
     outcome
@@ -187,6 +262,7 @@ fn attempt<A: WifiAdapter>(
     state: &mut HealState,
     wait: &mut dyn FnMut(Duration),
     recheck: &mut dyn FnMut() -> bool,
+    interrupted: &mut dyn FnMut() -> bool,
 ) -> Outcome {
     if state.cooling(Instant::now()) {
         return Outcome::Cooldown;
@@ -198,14 +274,14 @@ fn attempt<A: WifiAdapter>(
     }
     match adapter.connect_saved(target) {
         ConnectReq::Requested => {
-            let mut portal_ok = false;
-            for _ in 0..RECHECK_ROUNDS {
-                wait(Duration::from_secs(1));
-                if recheck() {
-                    portal_ok = true;
-                    break;
-                }
+            // 先等关联：没关联上就跑门户复检只会把窗口烧在还没连上的空等里。
+            // 关联没在预算内完成也算“请求已发出”，下一轮靠关联信号直接解锁。
+            if !wait_for_association(adapter, target, wait, interrupted) {
+                state.pending_association = true;
+                return Outcome::ConnectFailed(target.to_string());
             }
+            let portal_ok = portal_recheck(wait, recheck, interrupted);
+            state.pending_association = !portal_ok;
             Outcome::Connected {
                 ssid: target.to_string(),
                 portal_ok,
@@ -225,6 +301,47 @@ fn attempt<A: WifiAdapter>(
             ProfileState::Missing => Outcome::NoProfile(target.to_string()),
         },
     }
+}
+
+/// 等 Wi-Fi 关联完成：每 ASSOC_POLL 问一次，最多 ASSOC_TIMEOUT。
+/// 返回 false 表示预算内没关联上（或等待被打断），此时再跑门户复检没有意义。
+fn wait_for_association<A: WifiAdapter>(
+    adapter: &A,
+    target: &str,
+    wait: &mut dyn FnMut(Duration),
+    interrupted: &mut dyn FnMut() -> bool,
+) -> bool {
+    let polls = (ASSOC_TIMEOUT.as_secs() / ASSOC_POLL.as_secs()) as u32;
+    for _ in 0..polls {
+        match adapter.association(target) {
+            // 已经关联上、或平台看不出来：不再多花一次等待，直接进复检
+            AssocState::Connected | AssocState::Unknown => return true,
+            AssocState::Pending => {}
+        }
+        wait(ASSOC_POLL);
+        if interrupted() {
+            return false;
+        }
+    }
+    false
+}
+
+/// 关联完成后的门户复检：每 1 秒一轮，最多 RECHECK_ROUNDS 轮
+fn portal_recheck(
+    wait: &mut dyn FnMut(Duration),
+    recheck: &mut dyn FnMut() -> bool,
+    interrupted: &mut dyn FnMut() -> bool,
+) -> bool {
+    for _ in 0..RECHECK_ROUNDS {
+        wait(Duration::from_secs(1));
+        if interrupted() {
+            return false;
+        }
+        if recheck() {
+            return true;
+        }
+    }
+    false
 }
 
 /// 同一结论只记一次日志，避免掉线期间每轮巡检都刷屏
@@ -298,13 +415,19 @@ pub fn heal_on_unreachable(
         )
     };
     let mut wait = |gap: Duration| crate::agent::sleep(gap.as_secs().max(1), quit, wake);
+    // 退出或网络变化（DHCP 落地、换网）都算打断：等关联时一旦系统报地址变化就提前收手，
+    // 交给下一轮用「已关联」这个信号直接复检，不必把 20 秒预算耗满
+    let mut interrupted = || {
+        use std::sync::atomic::Ordering;
+        quit.load(Ordering::SeqCst) || wake.load(Ordering::SeqCst)
+    };
     let mut recheck = || {
         !matches!(
             crate::portal::status(Duration::from_secs(3)).0,
             crate::portal::Status::Unreachable
         )
     };
-    let _ = heal(
+    let _ = heal_interruptible(
         cfg,
         &probe,
         // 这个挂点本身就在“门户不可达”分支里，条件 2 已经由调度循环确认过
@@ -313,6 +436,7 @@ pub fn heal_on_unreachable(
         &mut internet_ok,
         &mut wait,
         &mut recheck,
+        &mut interrupted,
     );
 }
 
@@ -350,6 +474,8 @@ mod tests {
         ssid: Option<String>,
         visible: bool,
         profile: Option<bool>,
+        /// 关联状态；None 表示平台看不出来（默认流程：不等关联直接复检）
+        assoc: Option<AssocState>,
         asked: RefCell<Vec<&'static str>>,
     }
 
@@ -381,6 +507,63 @@ mod tests {
                 Some(false) => ConnectReq::Failed,
                 _ => ConnectReq::Requested,
             }
+        }
+        fn association(&self, _: &str) -> AssocState {
+            self.asked.borrow_mut().push("assoc");
+            self.assoc.unwrap_or(AssocState::Unknown)
+        }
+    }
+
+    /// 按顺序回答关联状态的适配器：第 n 次问到给出第 n 个答案，用完后重复最后一个
+    struct AssocSeq {
+        answers: Vec<AssocState>,
+        seen: RefCell<usize>,
+        connects: RefCell<usize>,
+    }
+
+    impl AssocSeq {
+        fn new(answers: &[AssocState]) -> Self {
+            AssocSeq {
+                answers: answers.to_vec(),
+                seen: RefCell::new(0),
+                connects: RefCell::new(0),
+            }
+        }
+
+        fn polls(&self) -> usize {
+            *self.seen.borrow()
+        }
+
+        fn connects(&self) -> usize {
+            *self.connects.borrow()
+        }
+    }
+
+    impl WifiAdapter for AssocSeq {
+        fn wired_connected(&self) -> bool {
+            false
+        }
+        fn current_ssid(&self) -> Option<String> {
+            None
+        }
+        fn target_visible(&self, _: &str) -> bool {
+            true
+        }
+        fn profile_saved(&self, _: &str) -> ProfileState {
+            ProfileState::Saved
+        }
+        fn connect_saved(&self, _: &str) -> ConnectReq {
+            *self.connects.borrow_mut() += 1;
+            ConnectReq::Requested
+        }
+        fn association(&self, _: &str) -> AssocState {
+            let mut seen = self.seen.borrow_mut();
+            let answer = *self
+                .answers
+                .get(*seen)
+                .unwrap_or_else(|| self.answers.last().unwrap());
+            *seen += 1;
+            answer
         }
     }
 
@@ -709,6 +892,371 @@ mod tests {
     fn 目标名称留空时回到默认学校网络() {
         assert_eq!(target_ssid(&cfg(true, "  ")), DEFAULT_SSID);
         assert_eq!(target_ssid(&cfg(true, "SNNU-Guest")), "SNNU-Guest");
+    }
+
+    // ---- 关联等待与冷却解锁 ----
+
+    #[test]
+    fn 关联按两秒一次轮询并且提前返回() {
+        // 第 3 次问到才关联上：2 次等待共 4 秒，不必等满 20 秒
+        let net = AssocSeq::new(&[
+            AssocState::Pending,
+            AssocState::Pending,
+            AssocState::Connected,
+        ]);
+        let mut waited = Vec::new();
+        let mut wait = |d: Duration| waited.push(d);
+        let mut interrupted = || false;
+        assert!(wait_for_association(
+            &net,
+            "SNNU",
+            &mut wait,
+            &mut interrupted
+        ));
+        assert_eq!(waited, vec![ASSOC_POLL; 2]);
+        assert_eq!(net.polls(), 3);
+    }
+
+    #[test]
+    fn 关联二十秒内没完成就放弃() {
+        let net = AssocSeq::new(&[AssocState::Pending]);
+        let mut waited = Vec::new();
+        let mut wait = |d: Duration| waited.push(d);
+        let mut interrupted = || false;
+        assert!(!wait_for_association(
+            &net,
+            "SNNU",
+            &mut wait,
+            &mut interrupted
+        ));
+        // 10 次 × 2 秒正好是 20 秒预算
+        assert_eq!(waited.len(), 10);
+        assert_eq!(waited.iter().sum::<Duration>(), ASSOC_TIMEOUT);
+        assert!(waited.iter().all(|d| *d == ASSOC_POLL));
+    }
+
+    #[test]
+    fn 关联等待可被打断() {
+        let net = AssocSeq::new(&[AssocState::Pending]);
+        let mut waits = 0;
+        let mut wait = |_: Duration| waits += 1;
+        let mut asked = 0;
+        let mut interrupted = || {
+            asked += 1;
+            asked >= 3
+        };
+        assert!(!wait_for_association(
+            &net,
+            "SNNU",
+            &mut wait,
+            &mut interrupted
+        ));
+        assert_eq!(waits, 3, "第 3 次等待之后就该收手");
+        assert_eq!(net.polls(), 3);
+    }
+
+    #[test]
+    fn 关联成功之后才复检门户() {
+        let net = AssocSeq::new(&[AssocState::Pending, AssocState::Connected]);
+        let mut state = HealState::default();
+        let mut waits = 0;
+        let mut wait = |_: Duration| waits += 1;
+        let mut probes = 0;
+        let mut recheck = || {
+            probes += 1;
+            true
+        };
+        let mut internet = || false;
+        let mut interrupted = || false;
+        let outcome = heal_interruptible(
+            &cfg(true, "SNNU"),
+            &net,
+            false,
+            &mut state,
+            &mut internet,
+            &mut wait,
+            &mut recheck,
+            &mut interrupted,
+        );
+        assert_eq!(
+            outcome,
+            Outcome::Connected {
+                ssid: "SNNU".to_string(),
+                portal_ok: true
+            }
+        );
+        // 关联 1 次等待 + 复检 1 次等待
+        assert_eq!(waits, 2);
+        assert_eq!(probes, 1);
+        assert_eq!(net.connects(), 1);
+    }
+
+    #[test]
+    fn 关联没完成就提前返回且一次复检都不跑() {
+        let net = AssocSeq::new(&[AssocState::Pending]);
+        let mut state = HealState::default();
+        let mut waits = 0;
+        let mut wait = |_: Duration| waits += 1;
+        let mut recheck = || unreachable();
+        let mut internet = || false;
+        let mut interrupted = || false;
+        let outcome = heal_interruptible(
+            &cfg(true, "SNNU"),
+            &net,
+            false,
+            &mut state,
+            &mut internet,
+            &mut wait,
+            &mut recheck,
+            &mut interrupted,
+        );
+        assert_eq!(outcome, Outcome::ConnectFailed("SNNU".to_string()));
+        assert_eq!(waits, 10, "只花关联预算，不再叠加 6 轮复检");
+    }
+
+    #[test]
+    fn 冷却期内关联完成就立即复检登录() {
+        let net = AssocSeq::new(&[AssocState::Connected]);
+        let mut state = HealState::default();
+        let mut waits = 0;
+        let mut wait = |_: Duration| waits += 1;
+        let mut internet = || false;
+        let mut interrupted = || false;
+        // 第 1 轮：连接已发出、关联也完成了，但门户还没通
+        let mut recheck = || false;
+        let first = heal_interruptible(
+            &cfg(true, "SNNU"),
+            &net,
+            false,
+            &mut state,
+            &mut internet,
+            &mut wait,
+            &mut recheck,
+            &mut interrupted,
+        );
+        assert_eq!(
+            first,
+            Outcome::Connected {
+                ssid: "SNNU".to_string(),
+                portal_ok: false
+            }
+        );
+
+        // 第 2 轮仍在冷却期内：关联已就绪就直接复检，既不发连接也不等冷却
+        let mut recheck = || true;
+        let second = heal_interruptible(
+            &cfg(true, "SNNU"),
+            &net,
+            false,
+            &mut state,
+            &mut internet,
+            &mut wait,
+            &mut recheck,
+            &mut interrupted,
+        );
+        assert_eq!(
+            second,
+            Outcome::Connected {
+                ssid: "SNNU".to_string(),
+                portal_ok: true
+            }
+        );
+        assert_eq!(net.connects(), 1, "解锁路径不该再发一次连接");
+    }
+
+    #[test]
+    fn 解锁机会只用一次门户仍不通就回到常规决策() {
+        let net = AssocSeq::new(&[AssocState::Connected]);
+        let mut state = HealState::default();
+        let mut wait = |_: Duration| {};
+        let mut internet = || false;
+        let mut interrupted = || false;
+        let mut recheck = || false;
+        let first = heal_interruptible(
+            &cfg(true, "SNNU"),
+            &net,
+            false,
+            &mut state,
+            &mut internet,
+            &mut wait,
+            &mut recheck,
+            &mut interrupted,
+        );
+        assert!(matches!(
+            first,
+            Outcome::Connected {
+                portal_ok: false,
+                ..
+            }
+        ));
+        let second = heal_interruptible(
+            &cfg(true, "SNNU"),
+            &net,
+            false,
+            &mut state,
+            &mut internet,
+            &mut wait,
+            &mut recheck,
+            &mut interrupted,
+        );
+        assert!(matches!(
+            second,
+            Outcome::Connected {
+                portal_ok: false,
+                ..
+            }
+        ));
+        // 第三轮已经用掉解锁机会：交回常规决策，仍在冷却期内就继续冷却，不重复发连接
+        let third = heal_interruptible(
+            &cfg(true, "SNNU"),
+            &net,
+            false,
+            &mut state,
+            &mut internet,
+            &mut wait,
+            &mut recheck,
+            &mut interrupted,
+        );
+        assert_eq!(third, Outcome::Cooldown);
+        assert_eq!(net.connects(), 1, "解锁失败不该引起第二轮连接");
+    }
+
+    // ---- 时延对比：旧路径的冷却空转 vs 新路径的关联即解锁 ----
+
+    /// 实测口径：Wi-Fi 关联加 DHCP 要 15~30 秒
+    const SIM_ASSOC_SECS: u64 = 25;
+    /// 一次门户探测最坏耗时
+    const SIM_PROBE: Duration = Duration::from_secs(3);
+    /// 掉线期间守护循环的巡检间隔
+    const SIM_POLL: Duration = Duration::from_secs(8);
+
+    /// 虚拟时钟：所有等待与探测耗时都累加到这里
+    #[derive(Default)]
+    struct VClock {
+        ms: u64,
+    }
+
+    impl VClock {
+        fn advance(&mut self, d: Duration) {
+            self.ms += d.as_millis() as u64;
+        }
+
+        fn secs(&self) -> u64 {
+            self.ms / 1000
+        }
+    }
+
+    /// 打桩网络：关联在第 SIM_ASSOC_SECS 秒完成
+    struct SimNet {
+        clock: RefCell<VClock>,
+    }
+
+    impl SimNet {
+        fn elapsed(&self) -> u64 {
+            self.clock.borrow().secs()
+        }
+    }
+
+    impl WifiAdapter for SimNet {
+        fn wired_connected(&self) -> bool {
+            false
+        }
+        fn current_ssid(&self) -> Option<String> {
+            None
+        }
+        fn target_visible(&self, _: &str) -> bool {
+            true
+        }
+        fn profile_saved(&self, _: &str) -> ProfileState {
+            ProfileState::Saved
+        }
+        fn connect_saved(&self, _: &str) -> ConnectReq {
+            ConnectReq::Requested
+        }
+        fn association(&self, _: &str) -> AssocState {
+            if self.elapsed() >= SIM_ASSOC_SECS {
+                AssocState::Connected
+            } else {
+                AssocState::Pending
+            }
+        }
+    }
+
+    /// 旧实现（本次改动前）的时延模型：连接后立刻 6 轮复检（1 秒间隔 + 3 秒探测），
+    /// 全失败就进 60 秒冷却；冷却期内不感知“关联已完成”，只能等冷却走完再连一次。
+    /// 对应现场 login.log 的 16:55:23 → 16:56:29（66 秒）→ 16:56:34 登录。
+    fn old_path_secs() -> u64 {
+        let mut clock = VClock::default();
+        // 第 1 次连接：复检窗口只有 6×(1s+3s)=24 秒，撑不到第 25 秒的关联完成
+        for _ in 0..RECHECK_ROUNDS {
+            clock.advance(Duration::from_secs(1));
+            clock.advance(SIM_PROBE);
+        }
+        assert!(
+            clock.secs() < SIM_ASSOC_SECS,
+            "复检窗口本来就撑不到关联完成"
+        );
+        // 冷却 60 秒，期间每 8 秒醒一次也不动作
+        while clock.secs() < 60 {
+            clock.advance(SIM_POLL);
+        }
+        // 冷却过后再连一次：关联早好了，一次探测就登录
+        clock.advance(SIM_PROBE);
+        clock.secs()
+    }
+
+    /// 新实现：真的跑 heal_interruptible，按守护循环的节奏反复巡检直到门户可达
+    fn new_path_secs() -> u64 {
+        let net = SimNet {
+            clock: RefCell::new(VClock::default()),
+        };
+        let mut state = HealState::default();
+        let mut internet = || false;
+        let mut interrupted = || false;
+        loop {
+            let outcome = {
+                let clock = &net.clock;
+                let mut wait = |d: Duration| clock.borrow_mut().advance(d);
+                // 门户探测本身也要花时间，探测时关联可能刚好完成
+                let mut recheck = || {
+                    clock.borrow_mut().advance(SIM_PROBE);
+                    clock.borrow().secs() >= SIM_ASSOC_SECS
+                };
+                heal_interruptible(
+                    &cfg(true, "SNNU"),
+                    &net,
+                    false,
+                    &mut state,
+                    &mut internet,
+                    &mut wait,
+                    &mut recheck,
+                    &mut interrupted,
+                )
+            };
+            if matches!(
+                outcome,
+                Outcome::Connected {
+                    portal_ok: true,
+                    ..
+                }
+            ) {
+                return net.elapsed();
+            }
+            // 一轮巡检结束按调度循环的间隔再睡一会儿（生产里还会被地址变化提前叫醒）
+            net.clock.borrow_mut().advance(SIM_POLL);
+            assert!(net.elapsed() < 300, "新路径 5 分钟内没恢复：{outcome:?}");
+        }
+    }
+
+    #[test]
+    fn 新路径把冷却空转整个去掉() {
+        let old = old_path_secs();
+        let new = new_path_secs();
+        println!("旧路径恢复时延 ≈ {old} 秒（关联 {SIM_ASSOC_SECS}s + 冷却空转 + 复检）");
+        println!("新路径恢复时延 ≈ {new} 秒（关联 {SIM_ASSOC_SECS}s + 复检 3s）");
+        assert!(new < old, "新路径 {new} 秒应该明显快于旧路径 {old} 秒");
+        // 省下的正是冷却空转：旧路径必须等满 60 秒冷却才可能再连
+        assert!(old - new >= 30, "新路径至少省下 30 秒，实际 {old} - {new}");
     }
 
     #[test]
