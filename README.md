@@ -111,11 +111,10 @@ install -Dm644 systemd/snnulogin.service ~/.config/systemd/user/snnulogin.servic
 
 ### Android
 
-单个前台服务 + 常驻通知，支持自动登录、掉线重连与 Wi-Fi 自愈。
+单个前台服务 + 常驻通知，支持自动登录与掉线重连（与上游一致；手机连 Wi-Fi 本身由系统自动化接管，本 fork 不做移动端 Wi-Fi 自愈）。
 
 - 只处理校园网认证，**不代替系统连接 Wi-Fi**，不使用 VPN、Root、无障碍服务、精确闹钟或常驻唤醒锁。
-- 权限：**只新增 `CHANGE_WIFI_STATE`**（正常权限，无运行时弹窗），用于在旧系统上请求连接学校 Wi-Fi；Android 10 起改为提交 `WifiNetworkSuggestion` 由系统决定，用户可在系统设置撤销。
-- **不申请定位权限**（也不申请 `NEARBY_WIFI_DEVICES`）。代价是自愈读当前 SSID 时系统返回 `UNKNOWN_SSID`：此时「是否已连在学校网络上」这一条判断读不到，按保守语义照常尝试连接（与 Windows 读不到 SSID 时一致），界面上的网络名称固定显示 `SNNU`。取舍理由与验收项见 [Android 验证记录](android/VALIDATION.md)。
+- 不申请定位权限，不申请 `CHANGE_WIFI_STATE`；界面上的网络名称固定显示 `SNNU`。
 - 关闭「自动登录」即停掉前台服务与通知，当前认证连接保留；锁屏后能否持续重连受厂商省电与自启动设置限制。
 
 详见 [Android 使用指南](android/README.md)。
@@ -182,7 +181,7 @@ install -Dm644 systemd/snnulogin.service ~/.config/systemd/user/snnulogin.servic
 
 | 项 | 上游 shixiang-liu/SNNU-AutoLogin | 本 fork |
 | :--- | :--- | :--- |
-| Wi-Fi 自愈 | 无 | **有**：Windows / Android / macOS / Linux 共用一套三条件决策核心（`src/wifi_heal_core.rs`），各平台只提供探测与连接适配器 |
+| Wi-Fi 自愈 | 无 | **有**：Windows / macOS / Linux 桌面三端共用一套三条件决策核心（`src/wifi_heal_core.rs`），各平台只提供探测与连接适配器。移动端（Android / iOS）不做——手机连 Wi-Fi 由系统自动化接管，无自愈必要 |
 | Linux | 无 | **有**：无头 CLI、systemd 用户单元、deb / tar.gz 打包 |
 | 平台数 | 3 | **4**（新增 Linux） |
 | 电信代拨 | 无 | **无**——上游与学校官方门户都没有这项能力，历史遗留需求不引入，避免伪造不存在的行为 |
