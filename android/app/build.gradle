@@ -14,7 +14,7 @@ android {
         applicationId 'io.github.shixiangliu.snnulogin'
         minSdk 26
         targetSdk 37
-        // 1 is already used by local test builds; keep versionCode 2monotonic so updates install over them.
+        // 1 is already used by local test builds; keep monotonic so updates install over them.
         versionCode 2
         versionName '1.0.0'
         testInstrumentationRunner 'io.github.shixiangliu.snnulogin.SmokeInstrumentation'
