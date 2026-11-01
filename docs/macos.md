@@ -55,7 +55,8 @@ macOS 侧的实现与限制：
 - 有线判定读 `networksetup -listallhardwareports` 里的以太网类端口，再看该设备 `ifconfig` 的链路状态；
 - 当前网络优先读 `airport -I`；`airport` 在 macOS 14.4 起已被移除，此时回退 `networksetup -getairportnetwork`；
 - 附近网络扫描同样依赖 `airport -s`，扫描不可用时不再扫描，改用两次尝试之间至少 60 秒的冷却限频；
-- 连接使用 `networksetup -connectairport`（开放网络免密）。部分 macOS 版本没有这个子命令，此时应用只记日志、不做连接动作，绝不会退回会新建系统网络配置的 `-setairportnetwork`。
+- 连接使用 `networksetup -connectairport`（开放网络免密）。部分 macOS 版本没有这个子命令，此时应用只记日志、不做连接动作（决策层归类为 `Unsupported`，不会反复重试），绝不会退回会新建系统网络配置的 `-setairportnetwork`。
+- 只连接系统「首选网络」里**已经保存过**的配置，不新建、不删除、不修改任何系统网络配置；在校外时先确认目标网络真的可见，避免每轮都发一次注定失败的连接命令。
 
 以上命令都没有在开发机上真实执行过（开发机是 Windows，无法切换 Wi-Fi），macOS CI 与实机验证仍是最终依据。
 
