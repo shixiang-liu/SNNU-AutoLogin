@@ -36,6 +36,13 @@
         ]
       }
     ],
+    "deviceConfig": {
+      "entry": {
+        "network": {
+          "cleartextTraffic": true
+        }
+      }
+    },
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"
