@@ -246,8 +246,12 @@ export class PortalService {
       } else if (status.kind === PortalKind.OFFLINE) {
         nextDelay = await this.relogin();
       } else {
+        // 轮询失败同样要给出技术细节：这是用户最常看到的那条状态，只说「确认已连接」无从判断原因
+        const detail: string = this.client.lastProbeError();
         this.publish(this.state(PortalKind.UNREACHABLE, '连不上门户',
-          '确认已连接 SNNU 校园网后会自动重试'));
+          detail.length > 0
+            ? `${detail}，确认已连接 SNNU 校园网后会自动重试`
+            : '确认已连接 SNNU 校园网后会自动重试'));
       }
     } catch (err) {
       this.publish(this.state(PortalKind.UNREACHABLE, '轮询异常', (err as Error).message));
@@ -306,8 +310,13 @@ export class PortalService {
     if (status.kind === PortalKind.OFFLINE) {
       return this.state(PortalKind.OFFLINE, '当前未登录', `门户端口 ${status.port} 可达，尚未认证`);
     }
+    // 带上探测层记下的第一手失败原因：界面直接显示 DNS / 路由 / 明文拦截的区别，
+    // 用户不必再去翻 hilog。没有记录时（例如从没探测过）退回原来的笼统提示。
+    const detail: string = this.client.lastProbeError();
     return this.state(PortalKind.UNREACHABLE, '连不上门户',
-      '11 个候选端口都不可达，请确认已连接 SNNU 校园网');
+      detail.length > 0
+        ? `11 个候选端口都不可达（${detail}），请确认已连接 SNNU 校园网`
+        : '11 个候选端口都不可达，请确认已连接 SNNU 校园网');
   }
 
   private static describe(session: PortalSession | null): string {

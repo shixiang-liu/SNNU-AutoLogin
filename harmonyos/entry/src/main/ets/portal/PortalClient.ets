@@ -1,5 +1,7 @@
 import http from '@ohos.net.http';
 import util from '@ohos.util';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /**
  * 门户协议客户端（HarmonyOS NEXT / ArkTS）。
@@ -25,6 +27,41 @@ const USER_AGENT: string =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 const ACCEPT_LANGUAGE: string = 'zh-CN,zh;q=0.9';
+
+/** hilog 域与标签，与 EntryAbility 同域，便于 hdc hilog 一次过滤 */
+const LOG_DOMAIN: number = 0x0000;
+const LOG_TAG: string = 'PortalClient';
+
+/**
+ * 把一次异常压成一行可诊断文本。@ohos.net.http 失败时抛 BusinessError：
+ * code 直接指出原因（2300006 域名解析失败 / 2300007 连不上服务器 / 2300028 超时），
+ * 而 message 常常只有一句笼统的英文，所以两者都要带上，缺一个就难判断是 DNS、路由还是明文拦截。
+ */
+function describeError(err: Error): string {
+  const error: BusinessError = err as BusinessError;
+  const message: string = error.message;
+  const code: number = error.code;
+  // 用 typeof 而不是与 undefined 比较：BusinessError.code 声明为非空 number，
+  // 但网络栈个别失败只带 message，运行时仍可能是 undefined，直接比会被类型检查判为无交集。
+  const hasCode: boolean = typeof code === 'number' && code > 0;
+  const hasMessage: boolean = typeof message === 'string' && message.length > 0;
+  if (hasCode && hasMessage) {
+    return `code=${code} ${message}`;
+  }
+  if (hasMessage) {
+    return message;
+  }
+  if (hasCode) {
+    return `code=${code}`;
+  }
+  return '未知错误';
+}
+
+/** 统一失败日志。占位符用 %{public}s，避免错误文本里的 % 被当成格式符 */
+function logFailure(where: string, port: number, err: Error): void {
+  hilog.error(LOG_DOMAIN, LOG_TAG, '%{public}s port=%{public}d err=%{public}s',
+    where, port, describeError(err));
+}
 
 /** 单端口探测超时；11 个端口并行探测，整体受这一预算约束 */
 const PROBE_TIMEOUT_MS: number = 1500;
@@ -107,6 +144,17 @@ export function sleep(ms: number): Promise<void> {
 export class PortalClient {
   /** 缓存的可用端口，0 表示尚未探测成功（对齐 portal.rs 的 state.port） */
   private preferredPort: number = 0;
+  /**
+   * 最近一次端口探测失败的原因，形如「port=8601 code=2300006 Couldn't resolve host name」。
+   * locate() 只回一个 unreachable 状态，界面需要一句技术细节才判断得出是 DNS、路由还是明文拦截，
+   * 所以由探测层记下第一手原因，login() 的报错文案再把它带出去。
+   */
+  private probeError: string = '';
+
+  /** 最近一次探测失败原因；空串表示没有记录 */
+  lastProbeError(): string {
+    return this.probeError;
+  }
 
   cachedPort(): number {
     return this.preferredPort;
@@ -158,9 +206,29 @@ export class PortalClient {
         cookie = PortalClient.joinCookies(rawCookie);
       }
       return new RawResponse(response.responseCode as number, location, cookie, bytes);
+    } catch (err) {
+      // 单个端口的真实失败原因；调用方只看到 null，因此必须在这里留痕
+      const port: string = PortalClient.portOf(url);
+      hilog.error(LOG_DOMAIN, LOG_TAG, '%{public}s port=%{public}s url=%{public}s err=%{public}s',
+        'request 失败', port, url, describeError(err as Error));
+      throw err as Error;
     } finally {
       client.destroy();
     }
+  }
+
+  /** 从门户 URL 里取出端口，只为日志标注；取不到时返回 '?' 而不是抛错 */
+  private static portOf(url: string): string {
+    const start: number = url.indexOf('://');
+    if (start < 0) {
+      return '?';
+    }
+    const colon: number = url.indexOf(':', start + 3);
+    if (colon < 0) {
+      return '?';
+    }
+    const slash: number = url.indexOf('/', colon);
+    return slash < 0 ? url.substring(colon + 1) : url.substring(colon + 1, slash);
   }
 
   /** 一次响应可能有多个 Set-Cookie（JSESSIONID 之外还有负载均衡 Cookie），全部带回 */
@@ -341,20 +409,38 @@ export class PortalClient {
         // 状态页被跳到登录页时跟随一次；跨地址跳转一律不跟随（portal.rs:399-415）。
         const target: string = this.resolveRedirect(port, response.location);
         if (target.length === 0) {
+          // 跳转目标跨主机/跨端口：不是这台门户的地址，本端口判定不可用
+          hilog.error(LOG_DOMAIN, LOG_TAG, '%{public}s port=%{public}d code=%{public}d location=%{public}s',
+            'statusAt 跳转目标不可跟随', port, response.code, response.location);
           return null;
         }
         const next: RawResponse = await PortalClient.request(
           target, http.RequestMethod.GET, {}, '', timeoutMs, timeoutMs);
         if (next.code !== 200) {
+          hilog.error(LOG_DOMAIN, LOG_TAG, '%{public}s port=%{public}d code=%{public}d',
+            'statusAt 跟随跳转后非 200', port, next.code);
           return null;
         }
         body = PortalClient.decode(next.bytes);
       } else if (response.code === 200) {
         body = PortalClient.decode(response.bytes);
       } else {
+        hilog.error(LOG_DOMAIN, LOG_TAG, '%{public}s port=%{public}d code=%{public}d',
+          'statusAt 响应码异常', port, response.code);
+        if (this.probeError.length === 0) {
+          this.probeError = `port=${port} HTTP ${response.code}`;
+        }
         return null;
       }
     } catch (err) {
+      // 探测失败的主因都落在这里：DNS 解析不了、路由不通、明文 HTTP 被系统拦截
+      const reason: string = `port=${port} ${describeError(err as Error)}`;
+      logFailure('statusAt 请求失败', port, err as Error);
+      // 只留第一条。11 个端口是并行探测的，先抛出的那个不一定是端口表里的第一个，
+      // 但同一台机器上各端口失败原因通常相同（同一个 DNS / 同一条路由），取一条足以判断性质。
+      if (this.probeError.length === 0) {
+        this.probeError = reason;
+      }
       return null;
     }
     const session: PortalSession | null = PortalClient.sessionOf(body);
@@ -391,6 +477,7 @@ export class PortalClient {
    * 探测成功的端口写回缓存。
    */
   async locate(): Promise<PortalStatus> {
+    this.probeError = '';
     if (this.preferredPort > 0) {
       const cached: PortalStatus | null =
         await this.statusAt(this.preferredPort, CACHED_PROBE_TIMEOUT_MS);
@@ -444,7 +531,10 @@ export class PortalClient {
   async login(account: string, password: string, operator: string): Promise<PortalStatus> {
     const current: PortalStatus = await this.locate();
     if (current.kind === PortalKind.UNREACHABLE) {
-      throw new Error('连不上认证服务器');
+      const detail: string = this.probeError;
+      throw new Error(detail.length > 0
+        ? `连不上认证服务器（${detail}）`
+        : '连不上认证服务器（全部端口无响应）');
     }
     if (current.kind === PortalKind.ONLINE) {
       return current;
@@ -466,7 +556,10 @@ export class PortalClient {
         response = await PortalClient.request(loginUrl, http.RequestMethod.POST, header,
           PortalClient.formBody(account, password, operator), LOGIN_TIMEOUT_MS, LOGIN_TIMEOUT_MS);
       } catch (err) {
-        throw new Error('连不上认证服务器');
+        const detail: string = describeError(err as Error);
+        hilog.error(LOG_DOMAIN, LOG_TAG, '%{public}s port=%{public}d err=%{public}s',
+          'login 提交失败', port, detail);
+        throw new Error(`连不上认证服务器（port=${port}: ${detail}）`);
       }
       const html: string = PortalClient.decode(response.bytes);
       if (html.indexOf(PORTAL_MARK) >= 0) {
@@ -504,6 +597,8 @@ export class PortalClient {
         { 'Accept': 'text/html,application/xhtml+xml' }, '', 5000, 5000);
       return response.cookie;
     } catch (err) {
+      // 拿不到 Cookie 不致命（后续请求仍会发出），但失败原因要留痕，否则登录失败时无从判断
+      logFailure('openLoginPage 失败', port, err as Error);
       return '';
     }
   }
