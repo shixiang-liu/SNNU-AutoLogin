@@ -1,5 +1,6 @@
 import { PortalService, ServiceSnapshot } from '../portal/PortalService';
 import { PortalKind } from '../portal/PortalClient';
+import { SavedCredential } from '../portal/CredentialStore';
 
 /**
  * 主界面：学号 / 密码 / 上网方式 + 登录、状态、断开三个动作 + 状态展示区。
@@ -25,6 +26,16 @@ const OPERATORS: OperatorOption[] = [
   new OperatorOption('联通', 'unicom')
 ];
 
+/** 已存的 operator 值 → 按钮下标。存的值不认识时退回第一项（校园网），不抛错 */
+function operatorIndexOf(value: string): number {
+  for (let i = 0; i < OPERATORS.length; i++) {
+    if (OPERATORS[i].value === value) {
+      return i;
+    }
+  }
+  return 0;
+}
+
 @Entry
 @Component
 struct Index {
@@ -32,6 +43,7 @@ struct Index {
   @State password: string = '';
   @State operatorIndex: number = 0;
   @State autoReconnect: boolean = false;
+  @State remember: boolean = true;
   @State busy: boolean = false;
   @State title: string = '未开始';
   @State detail: string = '点击「状态」检查当前认证';
@@ -47,6 +59,21 @@ struct Index {
       this.online = snapshot.kind === PortalKind.ONLINE;
       this.autoReconnect = snapshot.running;
     });
+    this.restoreCredentials();
+  }
+
+  /** 启动时把上次存的学号 / 运营商 / 密码填回输入框，省去每次重输 */
+  private async restoreCredentials(): Promise<void> {
+    try {
+      const saved: SavedCredential = await this.service.restore();
+      this.account = saved.account;
+      this.password = saved.password;
+      this.operatorIndex = operatorIndexOf(saved.operator);
+      this.remember = saved.remember;
+    } catch (err) {
+      // 读回失败不影响使用，只是要重输一次；原因已在 CredentialStore 里记进 hilog
+      this.detail = '读取已保存的账号失败，请重新输入';
+    }
   }
 
   private currentOperator(): string {
@@ -111,6 +138,15 @@ struct Index {
       this.toast((err as Error).message);
     }
     this.busy = false;
+  }
+
+  private async toggleRemember(on: boolean): Promise<void> {
+    this.remember = on;
+    try {
+      await this.service.setRemember(on);
+    } catch (err) {
+      this.toast((err as Error).message);
+    }
   }
 
   private async toggleAuto(on: boolean): Promise<void> {
@@ -195,6 +231,15 @@ struct Index {
         Toggle({ type: ToggleType.Switch, isOn: this.autoReconnect })
           .onChange((isOn: boolean) => {
             this.toggleAuto(isOn);
+          })
+      }
+      .width('100%')
+
+      Row({ space: 8 }) {
+        Text($r('app.string.switch_remember')).fontSize(14).layoutWeight(1)
+        Toggle({ type: ToggleType.Switch, isOn: this.remember })
+          .onChange((isOn: boolean) => {
+            this.toggleRemember(isOn);
           })
       }
       .width('100%')

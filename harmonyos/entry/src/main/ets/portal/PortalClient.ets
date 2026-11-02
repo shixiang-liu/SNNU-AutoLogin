@@ -619,6 +619,8 @@ export class PortalClient {
       await PortalClient.request(`${PortalClient.base(port)}/logoff`, http.RequestMethod.GET,
         {}, '', LOGOFF_TIMEOUT_MS, LOGOFF_TIMEOUT_MS);
     } catch (err) {
+      // 断开失败只回 false，调用方据此提示「断开未确认」，真实原因必须留在日志里
+      logFailure('logout 请求失败', port, err as Error);
       return false;
     }
     for (let i = 0; i < 3; i++) {

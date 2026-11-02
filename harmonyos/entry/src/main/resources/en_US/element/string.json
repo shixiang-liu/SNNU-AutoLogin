@@ -61,6 +61,10 @@
       "value": "Re-login after a drop"
     },
     {
+      "name": "switch_remember",
+      "value": "Remember password"
+    },
+    {
       "name": "status_title",
       "value": "Status"
     },

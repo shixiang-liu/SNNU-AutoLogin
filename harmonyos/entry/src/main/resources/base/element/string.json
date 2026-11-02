@@ -61,6 +61,10 @@
       "value": "掉线自动重连"
     },
     {
+      "name": "switch_remember",
+      "value": "记住密码"
+    },
+    {
       "name": "status_title",
       "value": "当前状态"
     },

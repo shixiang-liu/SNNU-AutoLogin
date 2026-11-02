@@ -3,6 +3,7 @@ import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { PortalClient, PortalKind, PortalStatus, PortalSession } from './PortalClient';
+import { CredentialStore, SavedCredential } from './CredentialStore';
 
 /**
  * 前台轮询服务：对齐上游 Android 1.0.0 的 LoginService.java
@@ -64,10 +65,15 @@ export class PortalService {
   private snapshot: ServiceSnapshot = ServiceSnapshot.idle();
   private listener: SnapshotListener | null = null;
 
-  /** 用户凭据仅驻留内存，不落盘（与桌面端保存凭据的差异在 README 里说明） */
+  /**
+   * 凭据落盘：学号 / 上网方式在 Preferences，密码在 Asset Store Kit 加密存储。
+   * 这里的字段是轮询用的内存副本，来源与去向都经过 CredentialStore。
+   */
+  private store: CredentialStore = new CredentialStore();
   private account: string = '';
   private password: string = '';
   private operator: string = '';
+  private remember: boolean = true;
 
   static shared(): PortalService {
     if (PortalService.instance === null) {
@@ -78,6 +84,17 @@ export class PortalService {
 
   bind(context: common.UIAbilityContext): void {
     this.context = context;
+    this.store.bind(context);
+  }
+
+  /** 启动时读回已保存的凭据，同时刷进轮询用的内存副本 */
+  async restore(): Promise<SavedCredential> {
+    const saved: SavedCredential = await this.store.load();
+    this.account = saved.account;
+    this.operator = saved.operator;
+    this.password = saved.password;
+    this.remember = saved.remember;
+    return saved;
   }
 
   onSnapshot(listener: SnapshotListener): void {
@@ -111,6 +128,16 @@ export class PortalService {
 
   // ---------------------------------------------------------------- 手动操作
 
+  /** 「记住密码」开关：关掉时立刻删掉已存的密码，不等下一次登录 */
+  async setRemember(remember: boolean): Promise<void> {
+    this.remember = remember;
+    if (remember) {
+      return;
+    }
+    // 账号为空时 save 会跳过学号，只清密码，不会把已存的学号抹成空串
+    await this.store.save(this.account, '', this.operator, false);
+  }
+
   /** 手动登录：成功即接管轮询（用户显式点了登录，视为开启自动重连） */
   async login(account: string, password: string, operator: string): Promise<ServiceSnapshot> {
     this.account = account;
@@ -120,6 +147,8 @@ export class PortalService {
     try {
       const status: PortalStatus = await this.client.login(account, password, operator);
       this.attempt = 0;
+      // 认证通过才落盘：存下错的密码会让下次启动直接失败，还看不出是自己输错了
+      await this.store.save(account, password, operator, this.remember);
       const snapshot: ServiceSnapshot = new ServiceSnapshot(PortalKind.ONLINE, '已登录',
         PortalService.describe(status.session), this.running, status.session);
       this.publish(snapshot);
