@@ -20,6 +20,7 @@
         "name": "default",
         "compatibleSdkVersion": "26.0.0",
         "runtimeOS": "HarmonyOS",
+        "signingConfig": "default",
         "buildOption": {
           "strictMode": {
             "caseSensitiveCheck": true,
