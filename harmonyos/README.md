@@ -57,7 +57,7 @@ harmonyos/
 
 1. DevEco Studio → **File → Open**，选择本仓库的 `harmonyos/` 目录（**不是仓库根目录**）。
 2. 等待 hvigor 同步完成（右下角进度条消失、`entry` 模块出现绿色图标）。
-3. 若提示 SDK 版本不匹配：**File → Project Structure → Project**，把 Compile SDK 调到本机已装的 API 12+。
+3. 若提示「无法找到 API version 26.0.0 的 SDK」：DevEco 首次启动尚未下载对应 SDK。**File → Settings → HarmonyOS SDK**（或欢迎页 More Actions → SDK Manager）→ 勾选 **API 26 / HarmonyOS 7.0** 的 SDK 与 Toolchains → Apply 等下载完成后重新同步即可。工程已按 API 26 声明，装好后即可识别。
 
 ### 2.3 签名配置（真机运行的前置条件）
 
