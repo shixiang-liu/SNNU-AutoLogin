@@ -59,7 +59,7 @@ harmonyos/
 2. 等待 hvigor 同步完成（右下角进度条消失、`entry` 模块出现绿色图标）。
 3. 常见报错对照：
    - 「无法找到 API version 26.0.0 的 SDK」→ **File → Settings → HarmonyOS SDK**（或欢迎页 SDK Manager）→ 勾选 **API 26** 的 SDK 与 Toolchains → Apply 下载完成后重新同步。
-   - 「api version parameter is illegal」→ 工程格式过旧，`git pull` 更新本仓库（已修复为 `compatibleSdkVersion: "26"`）。
+   - 「api version parameter is illegal」/「Specification Limit Violation」→ 工程格式问题，`git pull` 更新本仓库（已修复为 `compatibleSdkVersion: "26.0.0"` 字符串格式）。
    - 「缺少设备导致无法新建 profile」→ 连接真机（USB 调试）或用 **Tools → Device Manager** 创建 Phone 模拟器（模拟器跑 debug 免签名）。
 
 ### 2.3 签名配置（真机运行的前置条件）
