@@ -5,7 +5,7 @@
     "description": "$string:module_desc",
     "mainElement": "EntryAbility",
     "deviceTypes": [
-      "phone",
+      "default",
       "tablet"
     ],
     "deliveryWithInstall": true,
@@ -36,13 +36,6 @@
         ]
       }
     ],
-    "deviceConfig": {
-      "entry": {
-        "network": {
-          "cleartextTraffic": true
-        }
-      }
-    },
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"
