@@ -7,18 +7,18 @@
         "material": {
           "certpath": "C:\\Users\\21670\\.ohos\\config\\default_harmonyos_fPxxDWjjSLAjfpvsA37pObrDPMVA6CuZowu8m_Bkb_E=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001AAEF26FD79CC29E9D6455998DA56EA6E35010234F7C4DA0419EC656C087A1812CD865693F4CA3",
+          "keyPassword": "0000001AED1A1DCF1E2A0A72CEDD2AB1270F038A20C310BBC6145A8AFD3C74F7620C366964C1D1EB3297",
           "profile": "C:\\Users\\21670\\.ohos\\config\\default_harmonyos_fPxxDWjjSLAjfpvsA37pObrDPMVA6CuZowu8m_Bkb_E=.p7b",
           "signAlg": "SHA256withECDSA",
           "storeFile": "C:\\Users\\21670\\.ohos\\config\\default_harmonyos_fPxxDWjjSLAjfpvsA37pObrDPMVA6CuZowu8m_Bkb_E=.p12",
-          "storePassword": "0000001AC5B8C83D24955183CB1D20C0A5A6DA9EDA0E31D68079702983B804975DB3FDEC19FA4160FBAA"
+          "storePassword": "0000001A94D11AE88273DCC4E1D0DB31CD80588D2E856B9A42DCBEC6A954C329DA13C659700A1DF0E54D"
         }
       }
     ],
     "products": [
       {
         "name": "default",
-        "compatibleSdkVersion": "26",
+        "compatibleSdkVersion": "26.0.0",
         "runtimeOS": "HarmonyOS",
         "buildOption": {
           "strictMode": {
