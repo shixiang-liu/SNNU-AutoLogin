@@ -8,23 +8,34 @@ import java.io.InterruptedIOException;
 import java.net.HttpURLConnection;
 import java.net.Proxy;
 import java.net.URL;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 
 /** No process-wide binding, default network fallback, proxy, implicit redirects or cookie jar. */
 final class WifiTransport implements PortalClient.Transport {
     private final Network network;
     private final BooleanSupplier cancelled;
-    private HttpURLConnection active;
+    private final Set<HttpURLConnection> active = new HashSet<>();
     WifiTransport(Network network, BooleanSupplier cancelled) { this.network = network; this.cancelled = cancelled; }
-    synchronized void cancel() { if (active != null) active.disconnect(); }
+    void cancel() { cancelRequests(); }
+    @Override public void cancelRequests() {
+        HttpURLConnection[] connections;
+        synchronized (this) {
+            connections = active.toArray(new HttpURLConnection[0]);
+            active.clear();
+        }
+        // Do not hold the tracking lock during a potentially blocking disconnect.
+        for (HttpURLConnection connection : connections) connection.disconnect();
+    }
     @Override public PortalClient.Response request(String method, String url, Map<String, String> headers,
             byte[] body, int timeout) throws IOException {
-        if (cancelled.getAsBoolean()) throw new InterruptedIOException("操作已取消");
+        if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("操作已取消");
         HttpURLConnection connection = (HttpURLConnection) network.openConnection(new URL(url), Proxy.NO_PROXY);
         synchronized (this) {
-            if (cancelled.getAsBoolean()) { connection.disconnect(); throw new InterruptedIOException("操作已取消"); }
-            active = connection;
+            if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) { connection.disconnect(); throw new InterruptedIOException("操作已取消"); }
+            active.add(connection);
         }
         try {
             connection.setInstanceFollowRedirects(false);
@@ -36,7 +47,7 @@ final class WifiTransport implements PortalClient.Transport {
             if (body != null) {
                 connection.setDoOutput(true);
                 connection.setFixedLengthStreamingMode(body.length);
-                if (cancelled.getAsBoolean()) throw new InterruptedIOException("操作已取消");
+                if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("操作已取消");
                 try (java.io.OutputStream stream = connection.getOutputStream()) { stream.write(body); }
             }
             int code = connection.getResponseCode();
@@ -47,7 +58,7 @@ final class WifiTransport implements PortalClient.Transport {
                 byte[] buffer = new byte[4096];
                 int read;
                 while ((read = input.read(buffer)) != -1) {
-                    if (cancelled.getAsBoolean()) throw new InterruptedIOException("操作已取消");
+                    if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("操作已取消");
                     if (out.size() + read > 262144) throw new IOException("门户响应过大");
                     if (android.os.SystemClock.elapsedRealtime() > deadline) throw new IOException("门户响应超时");
                     out.write(buffer, 0, read);
@@ -56,7 +67,7 @@ final class WifiTransport implements PortalClient.Transport {
             return new PortalClient.Response(code, connection.getHeaderFields(), out.toByteArray());
         } finally {
             connection.disconnect();
-            synchronized (this) { if (active == connection) active = null; }
+            synchronized (this) { active.remove(connection); }
         }
     }
 }

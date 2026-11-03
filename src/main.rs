@@ -16,6 +16,8 @@ mod tray;
 mod tray_model;
 mod ui_model;
 #[cfg(windows)]
+mod wifi_recovery;
+#[cfg(windows)]
 mod win32_main;
 #[cfg(windows)]
 use win32_main::export_diag;

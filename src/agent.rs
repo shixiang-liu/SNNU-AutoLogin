@@ -232,6 +232,16 @@ pub fn run_daemon() {
         });
     }
 
+    #[cfg(windows)]
+    let mut wifi_recovery = crate::wifi_recovery::Recovery::default();
+    #[cfg(windows)]
+    let wifi_watch = match crate::wifi_recovery::Watch::start(wake.clone()) {
+        Ok(watch) => Some(watch),
+        Err(error) => {
+            crate::config::logf(&format!("无线事件监听不可用，改用离线轮询：{error}"));
+            None
+        }
+    };
     let mut fail = 0i32;
     let mut beat = 0i32;
     let mut was_online = false;
@@ -241,10 +251,25 @@ pub fn run_daemon() {
     while !quit.load(Ordering::SeqCst) {
         if wake.swap(false, Ordering::SeqCst) {
             last_wake = portal::unix_now();
+            #[cfg(windows)]
+            wifi_recovery.network_changed();
+        }
+        #[cfg(windows)]
+        if let Some(watch) = &wifi_watch {
+            // Clear wake before draining events, so a callback racing this loop
+            // either gets drained now or still interrupts the following sleep.
+            watch.drain(&mut wifi_recovery);
         }
         let just_woke = portal::unix_now() - last_wake < 30.0;
         let (cfg, pwd) = load_config();
         let st = load_state();
+        #[cfg(windows)]
+        if pwd.is_empty()
+            || !cfg.wifi_self_heal
+            || !portal::automatic_login_allowed(&st, portal::unix_now())
+        {
+            wifi_recovery.cancel();
+        }
         if pwd.is_empty() {
             crate::tray::set_link(crate::tray::Link::Setup);
             // 设置完成后尽快接管状态与保活，避免托盘长时间停在“尚未设置账号”。
@@ -271,9 +296,44 @@ pub fn run_daemon() {
             );
             continue;
         }
+        #[cfg(windows)]
+        if cfg.wifi_self_heal && crate::config::load_state_checked().is_err() {
+            wifi_recovery.unreadable_state();
+            sleep(1, &quit, &wake);
+            continue;
+        }
+        #[cfg(windows)]
+        if cfg.wifi_self_heal && crate::network::physical_ipv4().is_none() {
+            // Radio/scan notifications arrive before DHCP. Do connection work
+            // first instead of waiting for unreachable portal HTTP requests.
+            wifi_recovery.on_unreachable(&quit);
+            crate::tray::set_link(crate::tray::Link::Waiting);
+            sleep(1, &quit, &wake);
+            continue;
+        }
+        #[cfg(windows)]
+        let probe_timeout = match wifi_recovery
+            .probe_plan(!wifi_recovery.waiting() || crate::network::physical_ipv4().is_some())
+        {
+            crate::wifi_recovery::ProbePlan::WaitForAddress => {
+                // Poll DHCP without blocking the daemon or resetting association.
+                sleep(1, &quit, &wake);
+                continue;
+            }
+            crate::wifi_recovery::ProbePlan::Probe(timeout) => {
+                wifi_recovery.address_ready();
+                timeout
+            }
+        };
+        #[cfg(not(windows))]
+        let probe_timeout = Duration::from_secs(4);
         #[cfg(target_os = "macos")]
         let probe_epoch = crate::macos::runtime::EPOCH.current();
-        let (status, port) = portal::status(Duration::from_secs(4));
+        let (status, port) = portal::status(probe_timeout);
+        #[cfg(windows)]
+        if !matches!(status, Status::Unreachable) {
+            wifi_recovery.portal_reached();
+        }
         #[cfg(target_os = "macos")]
         crate::macos::runtime::publish_probe(status.clone(), probe_epoch);
         if quit.load(Ordering::SeqCst) {
@@ -287,8 +347,14 @@ pub fn run_daemon() {
                     was_online = false;
                 }
                 crate::tray::set_link(crate::tray::Link::Waiting);
-                // 刚唤醒时网卡可能还没就绪，密集重试几次
-                sleep(if just_woke { 1 } else { 8 }, &quit, &wake)
+                #[cfg(windows)]
+                wifi_recovery.on_unreachable(&quit);
+                #[cfg(windows)]
+                let recovering = wifi_recovery.waiting();
+                #[cfg(not(windows))]
+                let recovering = false;
+                // A pending association keeps probing independently of connect cooldown.
+                sleep(if just_woke || recovering { 1 } else { 8 }, &quit, &wake)
             }
             Status::Online(session) => {
                 // 其他任务或用户在网页上恢复连接，也要及时撤掉“正在重连”。
@@ -353,11 +419,23 @@ pub fn run_daemon() {
                         crate::config::logf("检测到假在线，下线重登");
                         crate::tray::connecting("网络暂不可用", "正在尝试恢复连接");
                         if !portal::logout(port) {
-                            // 下线请求没送达时会话仍在线，login_automatic 会直接返回成功，
-                            // 导致假在线未修复却白等 20 分钟冷却。回滚冷却并稍后重试。
-                            crate::config::logf("下线失败，跳过本次修复");
-                            let _ = crate::config::try_update_state(|s| s.last_fix_ts = 0.0);
-                            sleep(30, &quit, &wake);
+                            // Failure means "not confirmed", not "not executed".
+                            // Release the connection lock before probing or backing off,
+                            // so manual pause/disconnect/account changes can proceed.
+                            drop(_connection);
+                            crate::config::logf("下线状态未确认，重新检查当前会话");
+                            let (current, _) = portal::status(Duration::from_secs(2));
+                            if matches!(current, Status::Offline) {
+                                continue; // Normal automatic login rechecks pause on the next iteration.
+                            }
+                            let mut retry = false;
+                            let _ = crate::config::try_update_state(|s| {
+                                if failed_logout_can_retry(&current, &cfg, s, portal::unix_now()) {
+                                    s.last_fix_ts = 0.0;
+                                    retry = true;
+                                }
+                            });
+                            sleep(if retry { 30 } else { 5 }, &quit, &wake);
                             continue;
                         }
                         crate::config::logf("已下线，重新登录");
@@ -549,6 +627,17 @@ fn record_internet_result(s: &mut crate::config::State, ok: bool) {
     s.no_internet = s.net_bad >= 2;
 }
 
+fn failed_logout_can_retry(
+    status: &Status,
+    cfg: &crate::config::Config,
+    state: &crate::config::State,
+    now: f64,
+) -> bool {
+    state.self_login_ok
+        && portal::automatic_login_allowed(state, now)
+        && matches!(status, Status::Online(session) if session_matches_config(session, cfg))
+}
+
 fn repair_due(s: &crate::config::State, now: f64) -> bool {
     s.net_bad >= 2
         && s.self_login_ok
@@ -688,6 +777,37 @@ mod tests {
         s.reconnect_paused = false;
         s.paused_until = 5000.0;
         assert!(!repair_due(&s, 4000.0));
+    }
+    #[test]
+    fn failed_logout_retry_requires_confirmed_own_session_and_permission() {
+        let cfg = crate::config::Config {
+            account: "20241234".into(),
+            operator: "mobile".into(),
+            ..Default::default()
+        };
+        let own = Status::Online(portal::Session {
+            account: "20241234@mobile".into(),
+            ip: String::new(),
+            login_time: String::new(),
+        });
+        let other = Status::Online(portal::Session {
+            account: "20249999@mobile".into(),
+            ip: String::new(),
+            login_time: String::new(),
+        });
+        let mut state = crate::config::State {
+            self_login_ok: true,
+            ..Default::default()
+        };
+        assert!(failed_logout_can_retry(&own, &cfg, &state, 2000.0));
+        for status in [Status::Offline, Status::Unreachable, other] {
+            assert!(!failed_logout_can_retry(&status, &cfg, &state, 2000.0));
+        }
+        state.reconnect_paused = true;
+        assert!(!failed_logout_can_retry(&own, &cfg, &state, 2000.0));
+        state.reconnect_paused = false;
+        state.paused_until = 3000.0;
+        assert!(!failed_logout_can_retry(&own, &cfg, &state, 2000.0));
     }
 }
 

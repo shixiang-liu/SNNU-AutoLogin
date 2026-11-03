@@ -144,7 +144,7 @@ public final class PortalProtocol {
         for (String sentence : text.split("[。!！;；]")) {
             if (containsAny(sentence, new String[]{"失败", "错误", "无效", "已过期", "在线数", "欠费", "锁定", "停用"})) return limited(sentence.trim());
         }
-        return loginForm(html) || text.isEmpty() ? "账号或密码错误，请检查后重试" : limit(text);
+        return loginForm(html) || text.isEmpty() ? "账号或密码错误，请检查后重试" : limited(text);
     }
     /** 去掉表单噪声后可能为空（例如句子本身只是“账号：密码：”），空提示会误导用户，回退到通用文案。 */
     private static String limited(String sentence) {

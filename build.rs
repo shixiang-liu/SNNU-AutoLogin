@@ -94,10 +94,25 @@ fn main() {
     let rc = find_rc().expect("找不到 rc.exe，请安装 Windows SDK，或通过 RC 环境变量指定完整路径");
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let version = format!("{}.0", env::var("CARGO_PKG_VERSION").unwrap());
+    let package_version = env::var("CARGO_PKG_VERSION").unwrap();
+    let version = if env::var("CARGO_PKG_VERSION_PRE")
+        .unwrap_or_default()
+        .is_empty()
+    {
+        format!("{package_version}.0")
+    } else {
+        package_version
+    };
+    // VERSIONINFO numeric fields accept only four integers, not a SemVer suffix.
+    let numeric_version = format!(
+        "{},{},{},0",
+        env::var("CARGO_PKG_VERSION_MAJOR").unwrap(),
+        env::var("CARGO_PKG_VERSION_MINOR").unwrap(),
+        env::var("CARGO_PKG_VERSION_PATCH").unwrap()
+    );
     let source = std::fs::read_to_string(root.join("app.rc"))
         .expect("无法读取 app.rc")
-        .replace("@VERSION_COMMA@", &version.replace('.', ","))
+        .replace("@VERSION_COMMA@", &numeric_version)
         .replace("@VERSION_DOT@", &version);
     let generated = out.join("app.rc");
     let resource = out.join("app.res");

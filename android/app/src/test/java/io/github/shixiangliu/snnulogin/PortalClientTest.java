@@ -22,7 +22,7 @@ public class PortalClientTest {
         final List<String> methods = new ArrayList<>(), urls = new ArrayList<>(), bodies = new ArrayList<>();
         final List<Map<String, String>> headers = new ArrayList<>();
         Script(PortalClient.Response... responses) { this.responses.addAll(Arrays.asList(responses)); }
-        @Override public PortalClient.Response request(String method, String url, Map<String, String> headers, byte[] body, int timeout) throws IOException {
+        @Override public synchronized PortalClient.Response request(String method, String url, Map<String, String> headers, byte[] body, int timeout) throws IOException {
             methods.add(method); urls.add(url); this.headers.add(headers); bodies.add(body == null ? "" : new String(body, StandardCharsets.UTF_8));
             if (responses.isEmpty()) throw new IOException("No scripted response");
             return responses.remove();

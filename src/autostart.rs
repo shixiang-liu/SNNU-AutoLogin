@@ -4,7 +4,7 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::{
     RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
-    KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ,
+    KEY_QUERY_VALUE, KEY_SET_VALUE, REG_EXPAND_SZ, REG_SZ, REG_VALUE_TYPE,
 };
 
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -55,19 +55,21 @@ pub fn disable() {
 
 pub fn enabled() -> bool {
     if let Some(h) = open(KEY_QUERY_VALUE.0) {
-        // 只查询值是否存在：命令路径可能很长，固定缓冲会因 ERROR_MORE_DATA 误报未启用。
+        // Query metadata without a fixed-size buffer, but reject empty/non-string values.
+        let mut kind = REG_VALUE_TYPE::default();
+        let mut len = 0;
         let rc = unsafe {
             windows::Win32::System::Registry::RegQueryValueExW(
                 h,
                 PCWSTR(wide(VALUE).as_ptr()),
                 None,
+                Some(&mut kind),
                 None,
-                None,
-                None,
+                Some(&mut len),
             )
         };
         let _ = unsafe { RegCloseKey(h) };
-        return rc == ERROR_SUCCESS;
+        return rc == ERROR_SUCCESS && (kind == REG_SZ || kind == REG_EXPAND_SZ) && len > 2;
     }
     false
 }

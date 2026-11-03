@@ -42,6 +42,17 @@ pub struct View {
     pub network_check: bool,
 }
 impl View {
+    #[cfg(windows)]
+    pub fn with_wifi_recovery(mut self, enabled: bool, status: &Status, allowed: bool) -> Self {
+        if enabled && matches!(status, Status::Unreachable) && self.action != Action::Account {
+            self.footer = "只连接已保存的 SNNU，保留其他网络";
+            if allowed {
+                self.subtitle = "已开启自动连接，等待可用的 SNNU".into();
+            }
+        }
+        self
+    }
+
     pub fn check_operator(
         mut self,
         status: &Status,
@@ -303,6 +314,45 @@ pub fn account_changed(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    #[test]
+    fn wifi_recovery_hint_respects_missing_account_and_user_pause() {
+        let waiting = super::present(
+            &super::Status::Unreachable,
+            true,
+            true,
+            false,
+            false,
+            "",
+            "test",
+        )
+        .with_wifi_recovery(true, &super::Status::Unreachable, true);
+        assert!(waiting.subtitle.contains("已开启自动连接"));
+        let paused = super::present(
+            &super::Status::Unreachable,
+            true,
+            true,
+            true,
+            false,
+            "",
+            "test",
+        )
+        .with_wifi_recovery(true, &super::Status::Unreachable, false);
+        assert!(!paused.subtitle.contains("已开启自动连接"));
+        let setup = super::present(
+            &super::Status::Unreachable,
+            false,
+            false,
+            false,
+            false,
+            "",
+            "",
+        )
+        .with_wifi_recovery(true, &super::Status::Unreachable, true);
+        assert_eq!(setup.action, super::Action::Account);
+        assert!(!setup.subtitle.contains("已开启自动连接"));
+    }
+
     use super::*;
     #[test]
     fn network_information_preserves_online_state_with_automatic_login_off() {

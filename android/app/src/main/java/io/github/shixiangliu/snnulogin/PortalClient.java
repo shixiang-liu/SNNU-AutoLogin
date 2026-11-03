@@ -8,10 +8,14 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import static io.github.shixiangliu.snnulogin.PortalProtocol.*;
 
@@ -19,6 +23,8 @@ import static io.github.shixiangliu.snnulogin.PortalProtocol.*;
 public final class PortalClient {
     public interface Transport {
         Response request(String method, String url, Map<String, String> headers, byte[] body, int timeout) throws IOException;
+        /** Close this client's in-flight requests without permanently disabling the transport. */
+        default void cancelRequests() {}
     }
     public static final class Response {
         public final int code;
@@ -51,7 +57,7 @@ public final class PortalClient {
         this.transport = transport; this.cancelled = cancelled; this.approvedHost = approvedHost;
     }
     private void check() throws InterruptedIOException {
-        if (cancelled.getAsBoolean()) throw new InterruptedIOException("操作已取消");
+        if (cancelled.getAsBoolean() || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("操作已取消");
     }
     private Response request(String method, String url, String cookie, byte[] body, int timeout) throws IOException {
         check();
@@ -105,11 +111,17 @@ public final class PortalClient {
         if (session != null) return new Status(Kind.ONLINE, session, endpoint);
         return loginForm(html) ? new Status(Kind.OFFLINE, null, endpoint) : Status.unreachable();
     }
-    /** Shared pool for the portal port scan; daemon threads never outlive the process. */
-    private static final ExecutorService SCANNER = Executors.newFixedThreadPool(
-        Math.min(4, PORTS.length), job -> {
-            Thread thread = new Thread(job, "portal-scan"); thread.setDaemon(true); return thread;
-        });
+    /** Shared scans remain bounded in parallelism; all workers expire when idle. */
+    private static final ThreadPoolExecutor SCANNER = scanner();
+    private static ThreadPoolExecutor scanner() {
+        int count = Math.min(4, PORTS.length);
+        ThreadPoolExecutor pool = new ThreadPoolExecutor(count, count, 3, TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(), job -> {
+                Thread thread = new Thread(job, "portal-scan"); thread.setDaemon(true); return thread;
+            });
+        pool.allowCoreThreadTimeOut(true);
+        return pool;
+    }
     public Status status(Endpoint cached) throws IOException {
         Status offline = null;
         if (cached != null) {
@@ -134,27 +146,53 @@ public final class PortalClient {
         // Serial probing of 11 ports can hold the single worker for seconds when the
         // portal is unreachable; scan them concurrently under one deadline instead.
         String host = cached == null ? HOST : cached.host;
+        CompletionService<Status> completed = new ExecutorCompletionService<>(SCANNER);
         List<Future<Status>> futures = new ArrayList<>();
-        for (int port : PORTS) {
-            final int candidate = port;
-            futures.add(SCANNER.submit(() -> {
-                try { return statusAt(new Endpoint(host, candidate), 450); }
-                catch (IOException ex) { check(); return null; }
-            }));
-        }
+        AtomicBoolean scanStopped = new AtomicBoolean();
+        PortalClient scan = new PortalClient(transport,
+            () -> scanStopped.get() || cancelled.getAsBoolean(), approvedHost);
         long deadlineNanos = System.nanoTime() + 1_500_000_000L;
-        for (Future<Status> future : futures) {
-            check();
-            long leftMillis = (deadlineNanos - System.nanoTime()) / 1_000_000L;
-            Status result;
-            try {
-                result = leftMillis > 0 ? future.get(leftMillis, TimeUnit.MILLISECONDS) : null;
-            } catch (Exception ex) { result = null; }
-            if (result == null) continue;
-            if (result.kind == Kind.ONLINE) return result;
-            if (result.kind == Kind.OFFLINE && offline == null) offline = result;
+        try {
+            for (int port : PORTS) {
+                check();
+                final int candidate = port;
+                futures.add(completed.submit(() -> {
+                    scan.check();
+                    try { return scan.statusAt(new Endpoint(host, candidate), 450); }
+                    catch (IOException ex) { scan.check(); return null; }
+                }));
+            }
+            int remaining = futures.size();
+            while (remaining > 0) {
+                check();
+                // Always consume completed results, even at the deadline. Never
+                // let one slow first port hide an already completed ONLINE result.
+                Future<Status> future = completed.poll();
+                if (future == null) {
+                    long left = deadlineNanos - System.nanoTime();
+                    if (left <= 0) break;
+                    future = completed.poll(Math.min(left, 100_000_000L), TimeUnit.NANOSECONDS);
+                    if (future == null) continue;
+                }
+                remaining--;
+                Status result;
+                try { result = future.get(); }
+                catch (ExecutionException unavailable) { check(); continue; }
+                check();
+                if (result == null) continue;
+                if (result.kind == Kind.ONLINE) return result;
+                if (result.kind == Kind.OFFLINE && offline == null) offline = result;
+            }
+            return offline == null ? Status.unreachable() : offline;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new InterruptedIOException("操作已取消");
+        } finally {
+            scanStopped.set(true);
+            for (Future<Status> future : futures) future.cancel(true);
+            transport.cancelRequests();
+            SCANNER.purge();
         }
-        return offline == null ? Status.unreachable() : offline;
     }
     public boolean approved(Endpoint endpoint) {
         return trustedHost(endpoint.host) || endpoint.host.equalsIgnoreCase(approvedHost);

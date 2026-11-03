@@ -2,6 +2,10 @@
 
 这些数据用于说明测量条件与实际占用，不是所有设备上的性能保证。Windows 工作集、macOS physical footprint 与 Android PSS 的统计口径不同，不能直接横向排名。
 
+## Windows v1.1.0
+
+2026-11-03 发布构建的 EXE 为 1,034,240 字节（约 0.99 MiB），SHA256：`7e54e41baaa3997e995f1343abe7546161ab2aad26c398d84c8ef22c0c5f24eb`。本次新增 Wi-Fi 自愈，尚未重新测量内存和长期待机耗电；首页 Windows 内存仍引用下面明确标注版本的历史记录。
+
 ## Windows v1.0.1
 
 测量日期 2026-10-27，Windows 11 x64（10.0.26200），真实校园网在线。使用 GitHub 发布的 **v1.0.1 EXE**，大小 1,025,536 字节（约 0.98 MiB），SHA256 为 `91954a21fd72c8cf22273e8ed98db174f203ed73e9a973e429fc6c561bba2f0f`。

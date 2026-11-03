@@ -30,6 +30,10 @@ pub struct Config {
     pub keepalive: bool,
     #[serde(default = "default_keepalive_min")]
     pub keepalive_min: u64,
+    /// Windows: opt-in reconnection to an already saved school Wi-Fi profile.
+    #[cfg(windows)]
+    #[serde(default)]
+    pub wifi_self_heal: bool,
 }
 
 fn default_keepalive() -> bool {
@@ -200,6 +204,14 @@ pub fn save_config(cfg: &Config, password: &str) -> std::io::Result<()> {
     atomic_write(&cfg_path(), &s)
 }
 
+/// Actions that change the physical connection must not guess pause/cooldown
+/// state when the file is missing, unreadable or damaged.
+#[cfg(windows)]
+pub(crate) fn load_state_checked() -> std::io::Result<State> {
+    serde_json::from_str(&fs::read_to_string(state_path())?)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
 pub fn load_state() -> State {
     let raw = fs::read_to_string(state_path()).unwrap_or_default();
     serde_json::from_str(&raw).unwrap_or_default()
@@ -221,21 +233,29 @@ fn update_state_at(path: &Path, f: impl FnOnce(&mut State)) -> std::io::Result<(
         Ok(raw) => match serde_json::from_str(&raw) {
             Ok(s) => s,
             Err(e) => {
+                static RECOVERY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
                 // 损坏的状态文件不能无限期阻塞状态更新：先备份原始内容再重建。
                 let backup = path.with_file_name(format!(
-                    "{}.corrupt-{}",
-                    path.file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("state"),
-                    stamp_compact()
+                    "{}.corrupt-{}-{}-{}",
+                    path.file_name().and_then(|n| n.to_str()).unwrap_or("state"),
+                    stamp_compact(),
+                    std::process::id(),
+                    RECOVERY_SEQUENCE.fetch_add(1, Ordering::Relaxed)
                 ));
-                let _ = fs::rename(path, &backup);
-                logf(&format!(
-                    "状态文件损坏，已备份为 {}：{}",
-                    backup.display(),
-                    e
-                ));
-                State::default()
+                // Preserve the original before replacing it. Failure to back up
+                // must leave the original untouched and stop this update.
+                fs::copy(path, &backup)?;
+                if path == state_path() {
+                    logf(&format!(
+                        "状态文件损坏，已备份为 {}；自动登录已暂停：{}",
+                        backup.display(),
+                        e
+                    ));
+                }
+                State {
+                    reconnect_paused: true,
+                    ..State::default()
+                }
             }
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => State::default(),
@@ -291,6 +311,16 @@ fn local_time() -> windows::Win32::Foundation::SYSTEMTIME {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(windows)]
+    fn wifi_recovery_is_opt_in_and_old_configs_remain_compatible() {
+        let old: Config =
+            serde_json::from_str(r#"{"account":"test","operator":"mobile"}"#).unwrap();
+        assert!(!old.wifi_self_heal);
+        let enabled: Config = serde_json::from_str(r#"{"wifi_self_heal":true}"#).unwrap();
+        assert!(enabled.wifi_self_heal);
+    }
 
     fn sandbox() -> PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -398,6 +428,14 @@ mod tests {
         // 状态重建后可正常更新。
         let rebuilt: State = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(rebuilt.net_bad, 9);
+        assert!(
+            rebuilt.reconnect_paused,
+            "damaged protection state must require an explicit resume"
+        );
+        assert!(!crate::portal::automatic_login_allowed(
+            &rebuilt,
+            crate::portal::unix_now()
+        ));
         // 原始损坏内容被保留在备份文件里，便于排查。
         let backup = fs::read_dir(path.parent().unwrap())
             .unwrap()
@@ -407,6 +445,19 @@ mod tests {
         assert_eq!(fs::read_to_string(backup.path()).unwrap(), "broken JSON");
         fs::remove_file(&path).unwrap();
         fs::remove_file(backup.path()).unwrap();
+        #[cfg(target_os = "macos")]
+        fs::remove_file(path.with_extension("lock")).unwrap();
+        fs::remove_dir(path.parent().unwrap()).unwrap();
+    }
+    #[test]
+    fn failed_corrupt_state_backup_keeps_original_and_stops_update() {
+        let path = sandbox().with_file_name(format!("{}.json", "s".repeat(240)));
+        fs::write(&path, "broken JSON").unwrap();
+        // The source component is valid, but appending the backup suffix exceeds
+        // the filesystem's component limit. No permission changes are needed.
+        assert!(update_state_at(&path, |s| s.reconnect_paused = false).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "broken JSON");
+        fs::remove_file(&path).unwrap();
         #[cfg(target_os = "macos")]
         fs::remove_file(path.with_extension("lock")).unwrap();
         fs::remove_dir(path.parent().unwrap()).unwrap();
