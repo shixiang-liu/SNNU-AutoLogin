@@ -48,6 +48,7 @@ const NOTE: i32 = 112;
 const ACCOUNT_ROW: i32 = 201;
 const AUTO_CONNECT: i32 = 202;
 const AUTO_START: i32 = 203;
+const WIFI_RECOVERY: i32 = 220;
 const CHECK_NETWORK: i32 = 113;
 const HELP: i32 = 206;
 const DELETE: i32 = 208;
@@ -201,13 +202,20 @@ fn controls() -> Vec<Control> {
             Toggle,
         ),
         c(
+            WIFI_RECOVERY,
+            Some(Settings),
+            (24, 320, 332, 62),
+            "自动连接学校 Wi-Fi\n已关闭，连接 Wi-Fi 交给系统",
+            Toggle,
+        ),
+        c(
             FEATURES,
             Some(Settings),
-            (24, 328, 332, 42),
+            (24, 402, 332, 42),
             "功能介绍",
             Row,
         ),
-        c(HELP, Some(Settings), (24, 382, 332, 42), "网络信息", Row),
+        c(HELP, Some(Settings), (24, 456, 332, 42), "网络信息", Row),
         c(
             INTRO,
             Some(Account),
@@ -338,6 +346,7 @@ struct Snapshot {
     configured: bool,
     running: bool,
     startup: bool,
+    wifi_recovery: bool,
     state: config::State,
 }
 impl Snapshot {
@@ -381,6 +390,7 @@ impl Snapshot {
             configured: kind != "setup",
             running: true,
             startup: true,
+            wifi_recovery: false,
             state,
         }
     }
@@ -653,7 +663,7 @@ unsafe fn layout(hwnd: HWND) {
     };
     let mut height = match page {
         Page::Home => 472 + home_extra,
-        Page::Settings => 448,
+        Page::Settings => 522,
         Page::Account => {
             if configured {
                 592
@@ -667,7 +677,7 @@ unsafe fn layout(hwnd: HWND) {
     height += account_extra;
     if !note.is_empty() {
         height = height.max(match page {
-            Page::Settings => 440 + note_height + 24,
+            Page::Settings => 514 + note_height + 24,
             Page::Help => 584 + info_extra + note_height + 18,
             Page::Features => 712 + note_height + 18,
             Page::Home => 420 + home_extra + note_height + 18,
@@ -710,7 +720,7 @@ unsafe fn layout(hwnd: HWND) {
             y = match page {
                 Page::Home => 420 + home_extra,
                 Page::Account => 397,
-                Page::Settings => 440,
+                Page::Settings => 514,
                 Page::Help => 584 + info_extra,
                 Page::Features => 712,
             };
@@ -948,6 +958,7 @@ unsafe fn apply_snapshot(hwnd: HWND, mut snap: Snapshot) {
     if !preview {
         snap.state = config::load_state();
         snap.startup = autostart::enabled();
+        snap.wifi_recovery = config::load_config().0.wifi_self_heal;
     }
     let view = ui_model::present(
         &snap.status,
@@ -963,6 +974,11 @@ unsafe fn apply_snapshot(hwnd: HWND, mut snap: Snapshot) {
         &snap.account,
         &snap.operator,
         snap.state.reconnect_paused,
+    )
+    .with_wifi_recovery(
+        snap.wifi_recovery,
+        &snap.status,
+        portal::automatic_login_allowed(&snap.state, portal::unix_now()),
     );
     let font = ui().gfx.body;
     let dpi = ui().dpi;
@@ -1069,11 +1085,26 @@ unsafe fn apply_snapshot(hwnd: HWND, mut snap: Snapshot) {
             "开机自动运行\n已关闭，需要时手动打开"
         },
     );
+    text(
+        hwnd,
+        WIFI_RECOVERY,
+        if snap.wifi_recovery {
+            "自动连接学校 Wi-Fi\n已开启，断网时连接已保存的 SNNU"
+        } else {
+            "自动连接学校 Wi-Fi\n已关闭，连接 Wi-Fi 交给系统"
+        },
+    );
     if ui().page == Page::Help {
         update_help(hwnd);
     }
     let _ = InvalidateRect(hwnd, None, false);
-    for id in [AUTO_CONNECT, AUTO_START, ACCOUNT_ROW, PRIMARY] {
+    for id in [
+        AUTO_CONNECT,
+        AUTO_START,
+        WIFI_RECOVERY,
+        ACCOUNT_ROW,
+        PRIMARY,
+    ] {
         let _ = InvalidateRect(child(hwnd, id), None, false);
     }
     apply_busy_label(hwnd);
@@ -1112,6 +1143,7 @@ fn probe() -> Snapshot {
         configured,
         running,
         startup: autostart::enabled(),
+        wifi_recovery: cfg.wifi_self_heal,
         state: config::load_state(),
     }
 }
@@ -1449,6 +1481,7 @@ unsafe fn save_account(hwnd: HWND) {
                         old.keepalive_min.max(5)
                     },
                     password_enc: String::new(),
+                    wifi_self_heal: old.wifi_self_heal,
                 };
                 config::save_config(&cfg, &password).map_err(|e| format!("账号保存失败：{}", e))?;
                 config::try_update_state(|s| {
@@ -1633,6 +1666,35 @@ unsafe fn command(hwnd: HWND, id: i32) {
             let _ = InvalidateRect(child(hwnd, PWD_EDIT), None, true);
         }
         AUTO_CONNECT => toggle_pause(hwnd),
+        WIFI_RECOVERY => {
+            let enable = !ui().snapshot.wifi_recovery;
+            if cfg!(debug_assertions) && ui().preview {
+                let mut snap = ui().snapshot.clone();
+                snap.wifi_recovery = enable;
+                apply_snapshot(hwnd, snap);
+                return;
+            }
+            job(
+                hwnd,
+                "正在保存…",
+                None,
+                if enable {
+                    "已开启，请先在系统中连接并保存 SNNU"
+                } else {
+                    "已关闭自动连接 Wi-Fi，保留当前连接"
+                },
+                false,
+                move || {
+                    let _connection = portal::connection_lock()?;
+                    let (mut cfg, password) = config::load_config();
+                    if password.is_empty() {
+                        return Err("请先保存校园网账号".into());
+                    }
+                    cfg.wifi_self_heal = enable;
+                    config::save_config(&cfg, &password).map_err(|e| e.to_string())
+                },
+            );
+        }
         AUTO_START => {
             let enable = !ui().snapshot.startup;
             if cfg!(debug_assertions) && ui().preview {
@@ -2054,10 +2116,10 @@ unsafe fn draw_button(dis: &DRAWITEMSTRUCT) {
             );
         }
         if c.style == Style::Toggle {
-            let on = if c.id == AUTO_CONNECT {
-                !u.snapshot.state.reconnect_paused
-            } else {
-                u.snapshot.startup
+            let on = match c.id {
+                AUTO_CONNECT => !u.snapshot.state.reconnect_paused,
+                WIFI_RECOVERY => u.snapshot.wifi_recovery,
+                _ => u.snapshot.startup,
             };
             let x = r.right - s(dpi, 54);
             let y = (r.top + r.bottom) / 2 - s(dpi, 11);
@@ -2687,6 +2749,7 @@ pub fn run_win32() -> Result<(), String> {
                 configured: !pwd.is_empty(),
                 running: agent::running(),
                 startup: autostart::enabled(),
+                wifi_recovery: cfg.wifi_self_heal,
                 state: config::load_state(),
             }
         };

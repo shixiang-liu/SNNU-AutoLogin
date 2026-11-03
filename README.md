@@ -7,7 +7,7 @@
 <p>连上学校网络，自动登录、掉线重连。</p>
 
 <p>
-  <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/v1.0.1"><img src="https://img.shields.io/badge/Windows-v1.0.1-2563eb?style=flat-square" alt="Windows v1.0.1"></a>
+  <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/Windows-v1.1.0-2563eb?style=flat-square" alt="Windows v1.1.0"></a>
   <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/macos-v1.0.0"><img src="https://img.shields.io/badge/macOS-v1.0.0-475569?style=flat-square" alt="macOS v1.0.0"></a>
   <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/android-v1.0.0"><img src="https://img.shields.io/badge/Android-v1.0.0-16a34a?style=flat-square" alt="Android v1.0.0"></a>
 </p>
@@ -26,7 +26,7 @@
 
 | 平台 | 下载安装 |
 | :--- | :--- |
-| **Windows**<br><sub>Windows 10 / 11 · x64</sub> | [单文件 EXE](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/v1.0.1/SNNU-AutoLogin.exe) · [免安装 ZIP](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/v1.0.1/SNNU-AutoLogin-v1.0.1-windows-x64.zip) |
+| **Windows**<br><sub>Windows 10 / 11 · x64</sub> | [单文件 EXE](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/v1.1.0/SNNU-AutoLogin.exe) · [免安装 ZIP](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/v1.1.0/SNNU-AutoLogin-v1.1.0-windows-x64.zip) |
 | **macOS**<br><sub>macOS 13 及以上</sub> | [M 系列芯片](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/macos-v1.0.0/SNNU-AutoLogin-v1.0.0-macos-arm64.zip) · [Intel 芯片](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/macos-v1.0.0/SNNU-AutoLogin-v1.0.0-macos-x64.zip) |
 | **Android**<br><sub>Android 8.0 及以上</sub> | [安装 APK](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/android-v1.0.0/SNNU-AutoLogin-android.apk) |
 
@@ -48,7 +48,7 @@ Windows 可直接运行 EXE，ZIP 需先解压。Mac 首次打开请参照[安�
 2. 填写学号、校园网密码和上网方式，点击「保存并连接」。
 3. 保持自动登录开启，关闭界面后继续在后台运行。
 
-工具负责校园网认证，不会替你切换 Wi-Fi。Android 如需锁屏后持续重连，请检查「后台与通知」设置。
+Windows 可在设置中开启「自动连接学校 Wi-Fi」，断网后尝试连接已保存的 SNNU。Android 如需锁屏后持续重连，请检查「后台与通知」设置。
 
 使用指南：[Windows](docs/windows.md) · [macOS](docs/macos.md) · [Android](android/README.md)
 
@@ -56,12 +56,12 @@ Windows 可直接运行 EXE，ZIP 需先解压。Mac 首次打开请参照[安�
 
 | 客户端 | 程序体积 | 后台内存记录 |
 | :--- | ---: | ---: |
-| Windows | 0.98 MiB | 13.6–58.8 MiB |
+| Windows | 0.99 MiB | 13.6–58.8 MiB |
 | macOS · M 系列 | 1.21 MiB | 13.4 MiB |
 | macOS · Intel | 1.25 MiB | 9.7 MiB |
 | Android | 55.2 KiB | 23.9 MiB |
 
-<sub>Windows 两项为本机冷启动与加载输入法扩展后的持续运行记录。各平台测量口径不同，以上并非内存上限，详见<a href="docs/performance.md">测试环境、统计口径与原始采样</a>。</sub>
+<sub>Windows 内存为 v1.0.1 的本机冷启动与持续运行历史记录，尚未重测 v1.1.0。各平台测量口径不同，以上并非内存上限，详见<a href="docs/performance.md">测试环境、统计口径与原始采样</a>。</sub>
 
 ## 反馈与开发
 

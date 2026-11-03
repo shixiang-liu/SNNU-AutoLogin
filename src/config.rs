@@ -30,6 +30,10 @@ pub struct Config {
     pub keepalive: bool,
     #[serde(default = "default_keepalive_min")]
     pub keepalive_min: u64,
+    /// Windows: opt-in reconnection to an already saved school Wi-Fi profile.
+    #[cfg(windows)]
+    #[serde(default)]
+    pub wifi_self_heal: bool,
 }
 
 fn default_keepalive() -> bool {
@@ -200,6 +204,14 @@ pub fn save_config(cfg: &Config, password: &str) -> std::io::Result<()> {
     atomic_write(&cfg_path(), &s)
 }
 
+/// Actions that change the physical connection must not guess pause/cooldown
+/// state when the file is missing, unreadable or damaged.
+#[cfg(windows)]
+pub(crate) fn load_state_checked() -> std::io::Result<State> {
+    serde_json::from_str(&fs::read_to_string(state_path())?)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
 pub fn load_state() -> State {
     let raw = fs::read_to_string(state_path()).unwrap_or_default();
     serde_json::from_str(&raw).unwrap_or_default()
@@ -273,6 +285,16 @@ fn local_time() -> windows::Win32::Foundation::SYSTEMTIME {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(windows)]
+    fn wifi_recovery_is_opt_in_and_old_configs_remain_compatible() {
+        let old: Config =
+            serde_json::from_str(r#"{"account":"test","operator":"mobile"}"#).unwrap();
+        assert!(!old.wifi_self_heal);
+        let enabled: Config = serde_json::from_str(r#"{"wifi_self_heal":true}"#).unwrap();
+        assert!(enabled.wifi_self_heal);
+    }
 
     fn sandbox() -> PathBuf {
         static NEXT: AtomicU64 = AtomicU64::new(0);

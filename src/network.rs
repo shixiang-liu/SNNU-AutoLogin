@@ -73,7 +73,7 @@ fn adapter_priority(kind: u32, name: &str, gateway: bool) -> Option<u8> {
     Some(1)
 }
 
-fn physical_ipv4() -> Option<Ipv4Addr> {
+pub(crate) fn physical_ipv4() -> Option<Ipv4Addr> {
     unsafe {
         let mut size = 16_384u32;
         for _ in 0..3 {
@@ -136,6 +136,48 @@ fn physical_ipv4() -> Option<Ipv4Addr> {
             return best.map(|(_, ip)| ip);
         }
         None
+    }
+}
+
+/// A physical Ethernet link prevents automatic Wi-Fi intervention, even before DHCP.
+pub(crate) fn wired_link_up() -> io::Result<bool> {
+    unsafe {
+        let mut size = 16_384u32;
+        for _ in 0..3 {
+            let mut buffer = vec![0u64; (size as usize).div_ceil(8)];
+            let first = buffer.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES_LH;
+            let code = GetAdaptersAddresses(
+                AF_INET.0 as u32,
+                GAA_FLAG_INCLUDE_GATEWAYS,
+                None,
+                Some(first),
+                &mut size,
+            );
+            if code == 111 {
+                continue;
+            }
+            if code != 0 {
+                return Err(io::Error::from_raw_os_error(code as i32));
+            }
+            let mut entry = first;
+            while !entry.is_null() {
+                let adapter = &*entry;
+                if adapter.OperStatus == IfOperStatusUp && adapter.IfType == IF_TYPE_ETHERNET_CSMACD
+                {
+                    let name = format!(
+                        "{} {}",
+                        adapter.FriendlyName.to_string().unwrap_or_default(),
+                        adapter.Description.to_string().unwrap_or_default()
+                    );
+                    if adapter_priority(adapter.IfType, &name, true).is_some() {
+                        return Ok(true);
+                    }
+                }
+                entry = adapter.Next;
+            }
+            return Ok(false);
+        }
+        Err(io::Error::other("网卡信息持续变化，暂缓自动连接 Wi-Fi"))
     }
 }
 
