@@ -1,6 +1,6 @@
 # Android 使用指南
 
-[下载安装包](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/android-v1.0.0/SNNU-AutoLogin-android.apk) · [返回项目首页](../README.md) · [开发与构建](../docs/android-development.md)
+[下载安装包](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/android-v1.0.1/SNNU-AutoLogin-android.apk) · [返回项目首页](../README.md) · [开发与构建](../docs/android-development.md)
 
 支持 **Android 8.0 及以上**，安装包不到 **60 KB**。连接学校 Wi-Fi 后，完成校园网认证与掉线重连，无需 Root 或 VPN。
 

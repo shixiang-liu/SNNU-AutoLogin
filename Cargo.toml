@@ -1,7 +1,7 @@
 [package]
 name = "snnulogin"
 build = "build.rs"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 description = "陕师大校园网自动登录工具，提供原生 Windows / macOS 界面与后台重连"
 license = "MIT"

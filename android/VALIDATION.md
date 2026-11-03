@@ -1,8 +1,12 @@
 # Android 验证记录
 
-2026-10-27（Asia/Shanghai），当前版本 **1.0.0 / versionCode 7**。开发测试签名版；真实校园网已验证，厂商自己的电池开关只能以系统页面为准。
+2026-11-03，Android **1.0.1 / versionCode 8**：88 项单元测试通过；Debug、Benchmark、Release Lint 均为 0 错误，保留 3 条已有警告。优化构建通过。本次补齐并发门户扫描的取消与收尾，扫描线程空闲后退出；手机端的换网、锁屏和长期耗电尚未重新验收。正式包 57,548 字节（约 56.2 KiB）；签名校验通过，证书 SHA-256 与 v1.0.0 相同：`f27041c3eadaefeec78c17e98a9d5c7c94b0750a879f502b713a26464e28add1`。已核对包名、versionName 1.0.1 与递增的 versionCode 8。
 
-## 当前版本已通过
+以下为 v1.0.0 的历史真机、模拟器和内存测量记录，不代表本次补丁重新做过这些检查。
+
+2026-10-27（Asia/Shanghai），历史版本 **1.0.0 / versionCode 7**。开发测试签名版；真实校园网已验证，厂商自己的电池开关只能以系统页面为准。
+
+## v1.0.0 已通过
 
 | 检查 | 结果 |
 | --- | --- |
@@ -11,7 +15,7 @@
 | 真机（PHB110，Android 16 / API 36） | 9/9 设备检查通过 |
 | Android 8 模拟器（API 26 / x86_64 AOSP） | 9/9 设备检查通过 |
 | 大字体与窄屏 | 1.8 倍字体、320 × 568 dp 下不重叠、不裁切，长文案换行正常 |
-| 正式签名包 | `SNNU-AutoLogin-android.apk`（1.0.5，包名 `io.github.shixiangliu.snnulogin`）通过 `apksigner verify`，在 API 26 模拟器安装并启动，页面可正常切换 |
+| 正式签名包 | `SNNU-AutoLogin-android.apk`（1.0.0，包名 `io.github.shixiangliu.snnulogin`）通过 `apksigner verify`，在 API 26 模拟器安装并启动，页面可正常切换 |
 
 真机端到端（一加 11，学校 Wi-Fi）：
 

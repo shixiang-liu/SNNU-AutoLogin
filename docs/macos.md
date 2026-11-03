@@ -1,8 +1,8 @@
 # macOS 使用指南
 
-当前版本 **v1.0.0**。支持 **macOS 13 及以上**，提供 Apple Silicon（arm64）与 Intel（x64）两个安装包。
+当前版本 **v1.0.1**。支持 **macOS 13 及以上**，提供 Apple Silicon（arm64）与 Intel（x64）两个安装包。
 
-[下载 macOS v1.0.0](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/macos-v1.0.0) · [返回项目首页](../README.md) · [从源码构建](building.md#macos)
+[下载 macOS v1.0.1](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/macos-v1.0.1) · [返回项目首页](../README.md) · [从源码构建](building.md#macos)
 
 ## 第一次使用
 

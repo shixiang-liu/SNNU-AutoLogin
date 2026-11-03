@@ -15,8 +15,8 @@ android {
         minSdk 26
         targetSdk 37
         // 1 is already used by local test builds; keep versionCode monotonic so updates install over them.
-        versionCode 7
-        versionName '1.0.0'
+        versionCode 8
+        versionName '1.0.1'
         testInstrumentationRunner 'io.github.shixiangliu.snnulogin.SmokeInstrumentation'
     }
     signingConfigs {

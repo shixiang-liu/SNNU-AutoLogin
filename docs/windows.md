@@ -1,8 +1,8 @@
 # Windows 使用指南
 
-当前版本 **v1.1.0**，支持 **Windows 10 / 11 · x64**。
+当前版本 **v1.1.1**，支持 **Windows 10 / 11 · x64**。
 
-[下载 Windows v1.1.0](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/v1.1.0) · [返回项目首页](../README.md) · [从源码构建](building.md#windows)
+[下载 Windows v1.1.1](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/v1.1.1) · [返回项目首页](../README.md) · [从源码构建](building.md#windows)
 
 ## 第一次使用
 
