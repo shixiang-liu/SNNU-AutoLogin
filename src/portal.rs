@@ -809,8 +809,9 @@ fn login_unlocked(account: &str, password: &str, operator: &str, port: u16) -> R
             return Err(out);
         }
 
-        // 响应不是验证码：用在线状态兜底确认是否其实已登录
-        if let (Status::Online(s), _) = status(Duration::from_secs(4)) {
+        // 响应不是验证码：用在线状态兜底确认是否其实已登录。
+        // 只复查当前提交使用的端口，避免在持有连接锁时重新全端口扫描。
+        if let Some(Status::Online(s)) = status_at(&host(), port, Duration::from_secs(2)) {
             let (online_user, _) = split_account(&s.account);
             if online_user == account {
                 mark_login_ok();

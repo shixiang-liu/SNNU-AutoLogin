@@ -14,7 +14,10 @@ pub fn ctl_port() -> u16 {
     if s.ctl_port > 0 {
         return s.ctl_port;
     }
-    let user = std::env::var("USERNAME").unwrap_or_else(|_| "user".into());
+    // Windows 用 USERNAME，macOS 用 USER；缺省值保持一致以便多用户区分。
+    let user = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "user".into());
     let sum: u32 = user.bytes().map(|b| b as u32).sum();
     49721 + (sum % 400) as u16
 }
@@ -415,7 +418,27 @@ pub fn run_daemon() {
                     if let (true, Some(port)) = (repair, repair_port) {
                         crate::config::logf("检测到假在线，下线重登");
                         crate::tray::connecting("网络暂不可用", "正在尝试恢复连接");
-                        let _ = portal::logout(port);
+                        if !portal::logout(port) {
+                            // Failure means "not confirmed", not "not executed".
+                            // Release the connection lock before probing or backing off,
+                            // so manual pause/disconnect/account changes can proceed.
+                            drop(_connection);
+                            crate::config::logf("下线状态未确认，重新检查当前会话");
+                            let (current, _) = portal::status(Duration::from_secs(2));
+                            if matches!(current, Status::Offline) {
+                                continue; // Normal automatic login rechecks pause on the next iteration.
+                            }
+                            let mut retry = false;
+                            let _ = crate::config::try_update_state(|s| {
+                                if failed_logout_can_retry(&current, &cfg, s, portal::unix_now()) {
+                                    s.last_fix_ts = 0.0;
+                                    retry = true;
+                                }
+                            });
+                            sleep(if retry { 30 } else { 5 }, &quit, &wake);
+                            continue;
+                        }
+                        crate::config::logf("已下线，重新登录");
                         std::thread::sleep(Duration::from_secs(1));
                         if !quit.load(Ordering::SeqCst) {
                             match portal::login_automatic(
@@ -604,6 +627,17 @@ fn record_internet_result(s: &mut crate::config::State, ok: bool) {
     s.no_internet = s.net_bad >= 2;
 }
 
+fn failed_logout_can_retry(
+    status: &Status,
+    cfg: &crate::config::Config,
+    state: &crate::config::State,
+    now: f64,
+) -> bool {
+    state.self_login_ok
+        && portal::automatic_login_allowed(state, now)
+        && matches!(status, Status::Online(session) if session_matches_config(session, cfg))
+}
+
 fn repair_due(s: &crate::config::State, now: f64) -> bool {
     s.net_bad >= 2
         && s.self_login_ok
@@ -743,6 +777,37 @@ mod tests {
         s.reconnect_paused = false;
         s.paused_until = 5000.0;
         assert!(!repair_due(&s, 4000.0));
+    }
+    #[test]
+    fn failed_logout_retry_requires_confirmed_own_session_and_permission() {
+        let cfg = crate::config::Config {
+            account: "20241234".into(),
+            operator: "mobile".into(),
+            ..Default::default()
+        };
+        let own = Status::Online(portal::Session {
+            account: "20241234@mobile".into(),
+            ip: String::new(),
+            login_time: String::new(),
+        });
+        let other = Status::Online(portal::Session {
+            account: "20249999@mobile".into(),
+            ip: String::new(),
+            login_time: String::new(),
+        });
+        let mut state = crate::config::State {
+            self_login_ok: true,
+            ..Default::default()
+        };
+        assert!(failed_logout_can_retry(&own, &cfg, &state, 2000.0));
+        for status in [Status::Offline, Status::Unreachable, other] {
+            assert!(!failed_logout_can_retry(&status, &cfg, &state, 2000.0));
+        }
+        state.reconnect_paused = true;
+        assert!(!failed_logout_can_retry(&own, &cfg, &state, 2000.0));
+        state.reconnect_paused = false;
+        state.paused_until = 3000.0;
+        assert!(!failed_logout_can_retry(&own, &cfg, &state, 2000.0));
     }
 }
 

@@ -247,6 +247,7 @@ pub fn watch() {
             let source = SCDynamicStoreCreateRunLoopSource(std::ptr::null(), store, 0);
             if source.is_null() {
                 CFRelease(store);
+                crate::config::logf("网络事件监听：创建 RunLoop 源失败，继续使用定时巡检");
                 return;
             }
             CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopDefaultMode);
