@@ -138,6 +138,15 @@ export class PortalService {
     await this.store.save(this.account, '', this.operator, false);
   }
 
+  /** 用户点了「登录」即保存凭据：网络不通（如模拟器）时也已留存，下次打开自动回填 */
+  async saveCredentials(account: string, password: string, operator: string, remember: boolean): Promise<void> {
+    this.account = account;
+    this.password = password;
+    this.operator = operator;
+    this.remember = remember;
+    await this.store.save(account, password, operator, remember);
+  }
+
   /** 手动登录：成功即接管轮询（用户显式点了登录，视为开启自动重连） */
   async login(account: string, password: string, operator: string): Promise<ServiceSnapshot> {
     this.account = account;

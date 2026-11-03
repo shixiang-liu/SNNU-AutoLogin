@@ -101,6 +101,9 @@ struct Index {
     if (this.busy || !this.validate()) {
       return;
     }
+    // 点登录即保存：网络不通时（如模拟器）凭据也已留存，下次打开自动回填；
+    // 密码是否保存跟随「记住密码」开关，用户主动输入即代表授权
+    await this.service.saveCredentials(this.account.trim(), this.password, this.currentOperator(), this.remember);
     this.busy = true;
     try {
       await this.service.login(this.account.trim(), this.password, this.currentOperator());
