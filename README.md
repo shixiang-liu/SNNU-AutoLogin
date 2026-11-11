@@ -52,6 +52,10 @@ Windows 可在设置中开启「自动连接学校 Wi-Fi」，断网后尝试连
 
 使用指南：[Windows](docs/windows.md) · [macOS](docs/macos.md) · [Android](android/README.md)
 
+Windows 托盘、macOS 菜单栏和 Android 设置提供「守卫者」和「在线设备管理」。守卫者默认关闭。
+开启后，当校园网门户显示至少 3 台设备在线，客户端会检查 Microsoft Connect Test。
+连续两次探测失败时，客户端尝试对本机重新认证。在线设备管理会打开校园网门户，可在门户查看设备及使用门户提供的下线操作。
+
 ## 体积与内存
 
 | 客户端 | 程序体积 | 后台内存记录 |

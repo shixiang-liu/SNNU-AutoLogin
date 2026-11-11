@@ -67,6 +67,8 @@ pub enum Command {
     Quit = 5,
     Automatic = 6,
     Settings = 7,
+    Guardian = 8,
+    Devices = 9,
 }
 
 pub struct Context {
@@ -74,6 +76,7 @@ pub struct Context {
     pub paused: bool,
     pub restricted: bool,
     pub no_internet: bool,
+    pub guardian: bool,
     pub busy: bool,
     pub link: Link,
 }
@@ -152,6 +155,20 @@ pub fn menu(c: &Context) -> Vec<Entry> {
         active && c.link == Link::Online,
         false,
     ));
+    {
+        entries.push(action(
+            Command::Guardian,
+            "守卫者（至少 3 台在线）",
+            active,
+            c.guardian,
+        ));
+        entries.push(action(
+            Command::Devices,
+            "在线设备管理（校园网门户）",
+            active && c.link == Link::Online,
+            false,
+        ));
+    }
     entries.push(Entry::Separator);
     entries.push(action(Command::Quit, "退出程序", true, false));
     entries
@@ -168,6 +185,7 @@ mod tests {
             paused: false,
             restricted: false,
             no_internet: false,
+            guardian: false,
             busy: false,
             link: Link::Online,
         }

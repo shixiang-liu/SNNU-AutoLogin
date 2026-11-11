@@ -259,7 +259,10 @@ public final class PortalClient {
         throw new IOException("下线尚未确认，自动登录已暂停");
     }
     public boolean internetOk() throws IOException {
-        for (int i = 0; i < PROBES.length; i++) {
+        return internetOk(false);
+    }
+    boolean internetOk(boolean guardian) throws IOException {
+        for (int i = guardian ? 1 : 0; i < PROBES.length; i++) {
             check();
             try {
                 Response response = request("GET", PROBES[i], "", null, 3000);
@@ -268,6 +271,35 @@ public final class PortalClient {
             } catch (IOException ex) { check(); }
         }
         return false;
+    }
+    int onlineDeviceCount(Status expected, String account, String operator) throws IOException {
+        if (!HOST.equals(expected.endpoint.host)) return -1;
+        try {
+            String html = decode(page(expected.endpoint, "userstatus.jsp", "", 3000).body);
+            Session current = session(html);
+            if (current == null || !current.matches(account, operator)) return -1;
+            java.util.regex.Matcher iframe = java.util.regex.Pattern.compile(
+                "(?i)<iframe\\b[^>]*?\\s+src\\s*=\\s*(['\"])(http://202\\.117\\.144\\.205(?::80)?/zili/auth_my_state\\.php\\?[^'\"]+)\\1"
+            ).matcher(html);
+            if (!iframe.find()) return -1;
+            Response response = request("GET", iframe.group(2).replace("&amp;", "&"), "", null, 3000);
+            if (response.code != 200) return -1;
+            String devices = decode(response.body);
+            java.util.regex.Matcher table = java.util.regex.Pattern.compile(
+                "(?is)<table\\b[^>]*\\sid\\s*=\\s*(['\"])ec_table\\1[^>]*>(.*?)</table>"
+            ).matcher(devices);
+            if (!table.find()) return -1;
+            String[] rows = table.group(2).split("(?i)</tr\\s*>");
+            if (rows.length == 0 || !rows[0].contains("上网IP") || !rows[0].contains("MAC地址")) return -1;
+            int count = 0;
+            for (int i = 1; i < rows.length; i++) {
+                if (rows[i].split("(?i)<td\\b", -1).length == 7) count++;
+            }
+            return count;
+        } catch (IOException ex) {
+            check();
+            return -1;
+        }
     }
     static String mergeCookies(String previous, Response response) {
         Map<String, String> pairs = new LinkedHashMap<>();

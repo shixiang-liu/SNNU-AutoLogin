@@ -429,6 +429,25 @@ public final class MainActivity extends Activity {
         autoHint = cardCopy(autoCard, "");
         automatic.setOnCheckedChangeListener((view, checked) -> { if (!updating) command(checked ? LoginService.RESUME : LoginService.PAUSE); });
         resumeAutomatic = cardAction(autoCard, "恢复自动登录", () -> command(LoginService.RESUME));
+        Switch guardian = new Switch(this);
+        guardian.setText("守卫者（至少 3 台在线）");
+        guardian.setChecked(store.guardian());
+        guardian.setEnabled(account.configured);
+        guardian.setOnCheckedChangeListener((view, checked) -> {
+            try { store.guardian(checked); }
+            catch (java.io.IOException ex) { error("无法保存守卫者设置"); show("settings"); }
+        });
+        autoCard.addView(guardian);
+        cardAction(autoCard, "在线设备管理（校园网门户）", () -> {
+            PortalClient.Status status = store.snapshot.status;
+            if (status.kind != PortalProtocol.Kind.ONLINE || status.endpoint == null
+                    || !PortalProtocol.HOST.equals(status.endpoint.host)) {
+                error("请先连接校园网");
+                return;
+            }
+            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(status.endpoint.base() + "userstatus.jsp"))); }
+            catch (RuntimeException ex) { error("无法打开在线设备管理页面"); }
+        });
         navigationRow("后台与通知", "查看通知、电池优化与开机恢复状态", () -> show("background"));
         navigationRow("网络信息", "检查网络，导出脱敏报告", () -> show("network"));
         navigationRow("使用帮助", "使用说明与常见问题", () -> show("help"));
