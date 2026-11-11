@@ -421,6 +421,107 @@ fn fetch_status_page(h: &str, port: u16, timeout: Duration) -> Option<String> {
     None
 }
 
+/// 在线设备列表由状态页中的子页面提供，地址带有当次会话参数。
+fn device_list_url(status_html: &str) -> Option<String> {
+    let lower = status_html.to_ascii_lowercase();
+    for (start, _) in lower.match_indices("<iframe") {
+        let end = lower[start..].find('>')? + start;
+        let tag = &lower[start..end];
+        let Some(offset) = tag.find(" src") else {
+            continue;
+        };
+        let value = status_html[start + offset + 4..end].trim_start();
+        let Some(value) = value.strip_prefix('=') else {
+            continue;
+        };
+        let value = value.trim_start();
+        let quote = value.chars().next()?;
+        if !matches!(quote, '\'' | '"') {
+            continue;
+        }
+        let url = value[1..].split_once(quote)?.0;
+        if url.starts_with("http://202.117.144.205:80/zili/auth_my_state.php?")
+            || url.starts_with("http://202.117.144.205/zili/auth_my_state.php?")
+        {
+            return Some(url.replace("&amp;", "&"));
+        }
+    }
+    None
+}
+
+/// 缺少设备表或表结构不符时返回未知，调用方不得据此触发下线。
+fn count_device_rows(html: &str) -> Option<usize> {
+    let lower = html.to_ascii_lowercase();
+    for (start, _) in lower.match_indices("<table") {
+        let open_end = lower[start..].find('>')? + start;
+        let opening = &lower[start..open_end];
+        if !opening.contains(" id=\"ec_table\"")
+            && !opening.contains(" id='ec_table'")
+        {
+            continue;
+        }
+        let end = lower[open_end..].find("</table>")? + open_end;
+        let mut rows = lower[open_end..end].split("</tr>");
+        let header = rows.next()?;
+        if !header.contains("上网ip") || !header.contains("mac地址") {
+            return None;
+        }
+        return Some(rows.filter(|row| {
+            row.contains("<tr") && row.matches("<td").count() == 6
+        }).count());
+    }
+    None
+}
+
+pub fn online_device_count(port: u16, expected: &Session) -> Option<usize> {
+    if host() != HOST {
+        return None;
+    }
+    let timeout = Duration::from_secs(3);
+    let status = fetch_status_page(HOST, port, timeout)?;
+    let current = session_of(&status)?;
+    if &current != expected {
+        return None;
+    }
+    let url = device_list_url(&status)?;
+    let response = request_builder()
+        .redirects(0)
+        .build()
+        .get(&url)
+        .set("User-Agent", UA)
+        .timeout(timeout)
+        .call()
+        .ok()?;
+    if response.status() != 200 {
+        return None;
+    }
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    response.into_reader().take(256 * 1024).read_to_end(&mut bytes).ok()?;
+    count_device_rows(&decode(&bytes))
+}
+
+#[cfg(test)]
+#[test]
+fn device_list_counts_records_in_the_portal_table() {
+    let header = "<tr><th>上网IP</th><th>MAC地址</th></tr>";
+    let row = "<tr><td>192.0.2.1</td><td>00:11:22:33:44:55</td><td></td><td></td><td></td><td></td></tr>";
+    let html = format!("<table id='ec_table'>{header}{}</table>", row.repeat(3));
+    assert_eq!(count_device_rows(&html), Some(3));
+    assert_eq!(count_device_rows("<table id='ec_table'><tr><td>登录</td></tr></table>"), None);
+}
+
+#[cfg(test)]
+#[test]
+fn device_list_url_is_restricted_to_the_campus_portal() {
+    let html = "<iframe src='http://202.117.144.205:80/zili/auth_my_state.php?vloginid=demo&amp;ts=1&amp;id=demo'></iframe>";
+    assert_eq!(
+        device_list_url(html).as_deref(),
+        Some("http://202.117.144.205:80/zili/auth_my_state.php?vloginid=demo&ts=1&id=demo"),
+    );
+    assert!(device_list_url(&html.replace("202.117.144.205", "example.com")).is_none());
+}
+
 fn cache_portal(h: &str, port: u16) {
     update_state(|s| {
         s.portal_host = h.to_string();
@@ -943,6 +1044,14 @@ pub fn internet_ok() -> bool {
     probes
         .iter()
         .any(|(url, code, body)| internet_probe(url, *code, body))
+}
+
+pub fn guardian_internet_ok() -> bool {
+    internet_probe(
+        "http://www.msftconnecttest.com/connecttest.txt",
+        200,
+        "Microsoft Connect Test",
+    )
 }
 
 fn internet_probe(url: &str, expected_code: u16, expected_body: &str) -> bool {

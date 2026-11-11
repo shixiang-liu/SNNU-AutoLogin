@@ -42,6 +42,10 @@ fn default_keepalive_min() -> u64 {
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct State {
     #[serde(default)]
+    pub guardian: bool,
+    #[serde(default)]
+    pub guardian_failures: u8,
+    #[serde(default)]
     pub port: u16,
     #[serde(default)]
     pub ctl_port: u16,

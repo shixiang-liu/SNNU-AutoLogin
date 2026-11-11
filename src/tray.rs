@@ -229,6 +229,7 @@ pub fn refresh_tip() {
         paused: state.reconnect_paused,
         restricted: state.paused_until > crate::portal::unix_now(),
         no_internet: state.no_internet,
+        guardian: state.guardian,
         busy: ACTION_BUSY.load(Ordering::SeqCst),
         link,
     };
@@ -246,6 +247,7 @@ fn menu_context() -> Context {
         paused: state.reconnect_paused,
         restricted: state.paused_until > crate::portal::unix_now(),
         no_internet: state.no_internet,
+        guardian: state.guardian,
         busy: ACTION_BUSY.load(Ordering::SeqCst),
         link: Link::from_byte(LINK.load(Ordering::SeqCst)),
     }
@@ -336,6 +338,7 @@ pub unsafe fn preview_menu(hwnd: HWND) {
         paused: false,
         restricted: false,
         no_internet: false,
+        guardian: false,
         busy: false,
         link: Link::Online,
     };
@@ -389,6 +392,40 @@ fn show_menu(hwnd: HWND, quit: &Arc<AtomicBool>) {
                 }
                 quit.store(true, Ordering::SeqCst);
                 let _ = PostMessageW(hwnd, WM_DESTROY, WPARAM(0), LPARAM(0));
+            }
+            return;
+        }
+        8 => {
+            if crate::config::try_update_state(|s| {
+                s.guardian = !s.guardian;
+                s.guardian_failures = 0;
+                s.net_bad = 0;
+                s.no_internet = false;
+            })
+            .is_err()
+            {
+                failed("无法保存守卫者设置");
+            }
+            return;
+        }
+        9 => {
+            let port = crate::config::load_state().port;
+            if crate::portal::PORTS.contains(&port) && crate::portal::host() == crate::portal::HOST {
+                let url = wide(&format!(
+                    "http://{}:{port}/snnuportal/userstatus.jsp",
+                    crate::portal::HOST
+                ));
+                let result = unsafe {
+                    windows::Win32::UI::Shell::ShellExecuteW(
+                        hwnd, windows::core::w!("open"), PCWSTR(url.as_ptr()),
+                        PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL,
+                    )
+                };
+                if result.0 as isize <= 32 {
+                    failed("无法打开在线设备管理页面");
+                }
+            } else {
+                failed("尚未连接到支持设备管理的校园网门户");
             }
             return;
         }
@@ -650,6 +687,7 @@ mod tests {
                 paused: false,
                 restricted: false,
                 no_internet: false,
+                guardian: false,
                 busy: false,
                 link: Link::Online,
             };

@@ -309,8 +309,30 @@ pub fn run_daemon() {
                     last_ping_ok = portal::unix_now();
                 }
                 if beat % 4 == 0 {
-                    let internet_ok = portal::internet_ok();
-                    update_state(|s| record_internet_result(s, internet_ok));
+                    let guardian = load_state().guardian;
+                    let guardian_eligible = guardian
+                        && session_matches_config(&session, &cfg)
+                        && portal::online_device_count(port, &session)
+                            .is_some_and(|count| count >= 3);
+                    let internet_ok = if guardian_eligible {
+                        portal::guardian_internet_ok()
+                    } else {
+                        portal::internet_ok()
+                    };
+                    update_state(|s| {
+                        if s.guardian == guardian {
+                            record_internet_result(s, internet_ok);
+                            s.guardian_failures = if guardian_eligible && !internet_ok {
+                                s.guardian_failures.saturating_add(1)
+                            } else {
+                                0
+                            };
+                        }
+                    });
+                    if guardian && !guardian_eligible {
+                        sleep(5, &quit, &wake);
+                        continue;
+                    }
                     let Ok(_connection) = portal::connection_lock() else {
                         sleep(5, &quit, &wake);
                         continue;
@@ -321,7 +343,10 @@ pub fn run_daemon() {
                     {
                         match portal::status(Duration::from_secs(4)) {
                             (Status::Online(current), current_port)
-                                if session_matches_config(&current, &cfg) =>
+                                if session_matches_config(&current, &cfg)
+                                    && (!guardian
+                                        || portal::online_device_count(current_port, &current)
+                                            .is_some_and(|count| count >= 3)) =>
                             {
                                 Some(current_port)
                             }
@@ -334,6 +359,7 @@ pub fn run_daemon() {
                     if crate::config::try_update_state(|s| {
                         if !quit.load(Ordering::SeqCst)
                             && repair_port.is_some()
+                            && s.guardian == guardian
                             && repair_due(s, portal::unix_now())
                         {
                             // 在发起修复前记录冷却，失败也不能立刻再次断网。
@@ -540,6 +566,7 @@ fn record_internet_result(s: &mut crate::config::State, ok: bool) {
 
 fn repair_due(s: &crate::config::State, now: f64) -> bool {
     s.net_bad >= 2
+        && (!s.guardian || s.guardian_failures >= 2)
         && s.self_login_ok
         && portal::automatic_login_allowed(s, now)
         && (s.last_fix_ts == 0.0 || now - s.last_fix_ts >= 1200.0)
