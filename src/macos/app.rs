@@ -1046,16 +1046,18 @@ impl Ui {
             paused: state.reconnect_paused,
             restricted: state.paused_until > portal::unix_now(),
             no_internet: state.no_internet,
+            guardian: state.guardian,
             busy,
             link: tray::link(),
         };
         let key = format!(
-            "{}:{:?}:{}:{}:{}",
+            "{}:{:?}:{}:{}:{}:{}",
             tray_model::status(&context),
             context.link,
             context.busy,
             context.paused,
-            context.configured
+            context.configured,
+            context.guardian
         );
         if key != self.menu_key {
             self.menu_key = key;
@@ -1082,6 +1084,8 @@ impl Ui {
                             tray_model::Command::Disconnect => 21,
                             tray_model::Command::Retry => 20,
                             tray_model::Command::Quit => 19,
+                            tray_model::Command::Guardian => 41,
+                            tray_model::Command::Devices => 42,
                         };
                         let item = self.menu_item(label, tag);
                         let _: () = msg_send![&item, setEnabled: enabled];
@@ -1106,6 +1110,31 @@ impl Ui {
         item
     }
     unsafe fn action(&mut self, tag: isize) {
+        if tag == 41 {
+            if config::try_update_state(|s| {
+                s.guardian = !s.guardian;
+                s.guardian_failures = 0;
+                s.net_bad = 0;
+                s.no_internet = false;
+            })
+            .is_err()
+            {
+                tray::failed("无法保存守卫者设置");
+            }
+            return;
+        }
+        if tag == 42 {
+            let port = config::load_state().port;
+            if portal::PORTS.contains(&port) && portal::host() == portal::HOST {
+                let url = format!("http://{}:{port}/snnuportal/userstatus.jsp", portal::HOST);
+                if std::process::Command::new("/usr/bin/open").arg(url).spawn().is_err() {
+                    tray::failed("无法打开在线设备管理页面");
+                }
+            } else {
+                tray::failed("尚未连接到支持设备管理的校园网门户");
+            }
+            return;
+        }
         if runtime::BUSY.load(Ordering::SeqCst)
             && matches!(tag, 10..=14 | 16 | 18 | 20 | 21 | 30..=32)
         {

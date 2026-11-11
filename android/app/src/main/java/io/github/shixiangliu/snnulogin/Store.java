@@ -136,6 +136,8 @@ final class Store {
         return generator.generateKey();
     }
     boolean automatic() { return preferences.getBoolean("automatic", false); }
+    boolean guardian() { return preferences.getBoolean("guardian", false); }
+    void guardian(boolean value) throws IOException { commit(preferences.edit().putBoolean("guardian", value)); }
     boolean notificationAsked() { return preferences.getBoolean("notification_asked", false); }
     void notificationAsked(boolean value) throws IOException { commit(preferences.edit().putBoolean("notification_asked", value)); }
     void automatic(boolean value) throws IOException { commit(preferences.edit().putBoolean("automatic", value)); }

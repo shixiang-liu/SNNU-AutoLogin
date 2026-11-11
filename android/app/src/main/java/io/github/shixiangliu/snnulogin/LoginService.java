@@ -64,6 +64,7 @@ public final class LoginService extends Service {
     // Worker-only connection history, invalidated on network changes through an epoch.
     private Network historyNetwork;
     private int failures, badInternet;
+    private boolean lastGuardian;
     private boolean selfLogin;
     private long lastInternetCheck;
 
@@ -354,16 +355,24 @@ public final class LoginService extends Service {
                     long now = System.currentTimeMillis();
                     // Connection maintenance belongs to automatic login. A user pause stops outside probes.
                     boolean checkInternet = ConnectionPolicy.shouldProbeInternet(store.automatic(), now, lastInternetCheck);
+                    boolean guardian = store.guardian();
+                    if (guardian != lastGuardian) {
+                        badInternet = 0;
+                        lastGuardian = guardian;
+                    }
                     if (checkInternet) {
-                        boolean ok = client.internetOk();
+                        boolean eligible = !guardian || client.onlineDeviceCount(status, account.name, account.operator) >= 3;
+                        boolean ok = client.internetOk(guardian && eligible);
                         if (!gate.valid(token)) return;
                         lastInternetCheck = now;
-                        badInternet = ok ? 0 : Math.min(badInternet + 1, 10);
+                        badInternet = ok || !eligible ? 0 : Math.min(badInternet + 1, 10);
                     }
-                    if (ConnectionPolicy.mayRepair(store.automatic(), store.pausedUntil(), now, store.lastRepair(),
+                    if (guardian == store.guardian() && ConnectionPolicy.mayRepair(store.automatic(), store.pausedUntil(), now, store.lastRepair(),
                             badInternet, selfLogin, status.session, account.name, account.operator)) {
                         PortalClient.Status confirmed = client.statusAt(status.endpoint, 4000);
-                        if (confirmed.kind == Kind.ONLINE && confirmed.session.matches(account.name, account.operator)) {
+                        if (confirmed.kind == Kind.ONLINE && confirmed.session.matches(account.name, account.operator)
+                                && (!guardian || client.onlineDeviceCount(confirmed, account.name, account.operator) >= 3)
+                                && guardian == store.guardian()) {
                             final boolean[] saved = {false};
                             gate.runIfCurrent(token, () -> {
                                 try { store.lastRepair(now); saved[0] = true; } catch (IOException ignored) { }

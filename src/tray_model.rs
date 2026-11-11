@@ -76,7 +76,6 @@ pub struct Context {
     pub paused: bool,
     pub restricted: bool,
     pub no_internet: bool,
-    #[cfg(windows)]
     pub guardian: bool,
     pub busy: bool,
     pub link: Link,
@@ -156,7 +155,6 @@ pub fn menu(c: &Context) -> Vec<Entry> {
         active && c.link == Link::Online,
         false,
     ));
-    #[cfg(windows)]
     {
         entries.push(action(
             Command::Guardian, "守卫者（至少 3 台在线）", active, c.guardian,
@@ -182,7 +180,6 @@ mod tests {
             paused: false,
             restricted: false,
             no_internet: false,
-            #[cfg(windows)]
             guardian: false,
             busy: false,
             link: Link::Online,
