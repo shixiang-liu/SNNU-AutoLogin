@@ -157,11 +157,16 @@ pub fn menu(c: &Context) -> Vec<Entry> {
     ));
     {
         entries.push(action(
-            Command::Guardian, "守卫者（至少 3 台在线）", active, c.guardian,
+            Command::Guardian,
+            "守卫者（至少 3 台在线）",
+            active,
+            c.guardian,
         ));
         entries.push(action(
-            Command::Devices, "在线设备管理（校园网门户）",
-            active && c.link == Link::Online, false,
+            Command::Devices,
+            "在线设备管理（校园网门户）",
+            active && c.link == Link::Online,
+            false,
         ));
     }
     entries.push(Entry::Separator);

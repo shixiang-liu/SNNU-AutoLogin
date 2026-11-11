@@ -1127,7 +1127,11 @@ impl Ui {
             let port = config::load_state().port;
             if portal::PORTS.contains(&port) && portal::host() == portal::HOST {
                 let url = format!("http://{}:{port}/snnuportal/userstatus.jsp", portal::HOST);
-                if std::process::Command::new("/usr/bin/open").arg(url).spawn().is_err() {
+                if std::process::Command::new("/usr/bin/open")
+                    .arg(url)
+                    .spawn()
+                    .is_err()
+                {
                     tray::failed("无法打开在线设备管理页面");
                 }
             } else {

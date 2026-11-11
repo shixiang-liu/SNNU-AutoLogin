@@ -410,15 +410,20 @@ fn show_menu(hwnd: HWND, quit: &Arc<AtomicBool>) {
         }
         9 => {
             let port = crate::config::load_state().port;
-            if crate::portal::PORTS.contains(&port) && crate::portal::host() == crate::portal::HOST {
+            if crate::portal::PORTS.contains(&port) && crate::portal::host() == crate::portal::HOST
+            {
                 let url = wide(&format!(
                     "http://{}:{port}/snnuportal/userstatus.jsp",
                     crate::portal::HOST
                 ));
                 let result = unsafe {
                     windows::Win32::UI::Shell::ShellExecuteW(
-                        hwnd, windows::core::w!("open"), PCWSTR(url.as_ptr()),
-                        PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL,
+                        hwnd,
+                        windows::core::w!("open"),
+                        PCWSTR(url.as_ptr()),
+                        PCWSTR::null(),
+                        PCWSTR::null(),
+                        SW_SHOWNORMAL,
                     )
                 };
                 if result.0 as isize <= 32 {

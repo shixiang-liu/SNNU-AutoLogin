@@ -455,9 +455,7 @@ fn count_device_rows(html: &str) -> Option<usize> {
     for (start, _) in lower.match_indices("<table") {
         let open_end = lower[start..].find('>')? + start;
         let opening = &lower[start..open_end];
-        if !opening.contains(" id=\"ec_table\"")
-            && !opening.contains(" id='ec_table'")
-        {
+        if !opening.contains(" id=\"ec_table\"") && !opening.contains(" id='ec_table'") {
             continue;
         }
         let end = lower[open_end..].find("</table>")? + open_end;
@@ -466,9 +464,10 @@ fn count_device_rows(html: &str) -> Option<usize> {
         if !header.contains("上网ip") || !header.contains("mac地址") {
             return None;
         }
-        return Some(rows.filter(|row| {
-            row.contains("<tr") && row.matches("<td").count() == 6
-        }).count());
+        return Some(
+            rows.filter(|row| row.contains("<tr") && row.matches("<td").count() == 6)
+                .count(),
+        );
     }
     None
 }
@@ -497,7 +496,11 @@ pub fn online_device_count(port: u16, expected: &Session) -> Option<usize> {
     }
     use std::io::Read;
     let mut bytes = Vec::new();
-    response.into_reader().take(256 * 1024).read_to_end(&mut bytes).ok()?;
+    response
+        .into_reader()
+        .take(256 * 1024)
+        .read_to_end(&mut bytes)
+        .ok()?;
     count_device_rows(&decode(&bytes))
 }
 
@@ -505,10 +508,14 @@ pub fn online_device_count(port: u16, expected: &Session) -> Option<usize> {
 #[test]
 fn device_list_counts_records_in_the_portal_table() {
     let header = "<tr><th>上网IP</th><th>MAC地址</th></tr>";
-    let row = "<tr><td>192.0.2.1</td><td>00:11:22:33:44:55</td><td></td><td></td><td></td><td></td></tr>";
+    let row =
+        "<tr><td>192.0.2.1</td><td>00:11:22:33:44:55</td><td></td><td></td><td></td><td></td></tr>";
     let html = format!("<table id='ec_table'>{header}{}</table>", row.repeat(3));
     assert_eq!(count_device_rows(&html), Some(3));
-    assert_eq!(count_device_rows("<table id='ec_table'><tr><td>登录</td></tr></table>"), None);
+    assert_eq!(
+        count_device_rows("<table id='ec_table'><tr><td>登录</td></tr></table>"),
+        None
+    );
 }
 
 #[cfg(test)]
