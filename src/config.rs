@@ -76,6 +76,8 @@ pub struct State {
 pub fn app_dir() -> PathBuf {
     #[cfg(target_os = "macos")]
     return crate::macos::storage::app_dir();
+    #[cfg(target_os = "linux")]
+    return crate::linux::storage::app_dir();
     #[cfg(windows)]
     let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
     #[cfg(windows)]
@@ -415,7 +417,7 @@ mod tests {
         assert_eq!(state.portal_host, "fixture.invalid");
         assert!(state.reconnect_paused);
         fs::remove_file(&path).unwrap();
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         fs::remove_file(path.with_extension("lock")).unwrap();
         fs::remove_dir(path.parent().unwrap()).unwrap();
     }
@@ -445,7 +447,7 @@ mod tests {
         assert_eq!(fs::read_to_string(backup.path()).unwrap(), "broken JSON");
         fs::remove_file(&path).unwrap();
         fs::remove_file(backup.path()).unwrap();
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         fs::remove_file(path.with_extension("lock")).unwrap();
         fs::remove_dir(path.parent().unwrap()).unwrap();
     }
@@ -458,7 +460,7 @@ mod tests {
         assert!(update_state_at(&path, |s| s.reconnect_paused = false).is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), "broken JSON");
         fs::remove_file(&path).unwrap();
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         fs::remove_file(path.with_extension("lock")).unwrap();
         fs::remove_dir(path.parent().unwrap()).unwrap();
     }
@@ -497,7 +499,16 @@ mod tests {
 
 #[cfg(target_os = "macos")]
 pub use crate::macos::storage::{load_config, save_config};
+
+#[cfg(target_os = "linux")]
+#[allow(unused_imports)]
+pub use crate::linux::storage::{load_config, save_config};
 #[cfg(target_os = "macos")]
 fn local_time() -> crate::macos::LocalTime {
     crate::macos::local_time()
+}
+
+#[cfg(target_os = "linux")]
+fn local_time() -> crate::linux::LocalTime {
+    crate::linux::local_time()
 }

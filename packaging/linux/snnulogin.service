@@ -1,0 +1,17 @@
+[Unit]
+Description=SNNU-AutoLogin 校园网自动登录（Linux 无头守护）
+Documentation=file:/usr/share/doc/snnulogin/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/snnulogin --daemon
+Restart=on-failure
+RestartSec=5
+# 无头守护只需要网络访问和自己的配置目录，别的权限都不要
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

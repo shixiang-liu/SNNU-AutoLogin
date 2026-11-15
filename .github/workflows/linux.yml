@@ -1,0 +1,53 @@
+name: Linux build
+
+on:
+  push:
+    branches: ['**']
+    paths: &linux-paths
+      - 'src/**'
+      - 'vendor/**'
+      - 'Cargo.*'
+      - 'build.rs'
+      - '.cargo/**'
+      - '.github/workflows/linux.yml'
+  pull_request:
+    paths: *linux-paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Test
+        run: cargo test --locked
+      - name: Build
+        run: cargo build --release --locked
+
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Build deb and tarball
+        run: bash scripts/package-linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snnulogin-linux
+          path: dist/linux/*
+          if-no-files-found: error
