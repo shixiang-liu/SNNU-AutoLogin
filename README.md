@@ -10,9 +10,11 @@
   <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/v1.1.2"><img src="https://img.shields.io/badge/Windows-v1.1.2-2563eb?style=flat-square" alt="Windows v1.1.2"></a>
   <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/macos-v1.0.2"><img src="https://img.shields.io/badge/macOS-v1.0.2-475569?style=flat-square" alt="macOS v1.0.2"></a>
   <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/android-v1.0.2"><img src="https://img.shields.io/badge/Android-v1.0.2-16a34a?style=flat-square" alt="Android v1.0.2"></a>
+  <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/linux-v1.0.0"><img src="https://img.shields.io/badge/Linux-v1.0.0-e95420?style=flat-square" alt="Linux v1.0.0"></a>
+  <a href="ios/shortcuts-guide.md"><img src="https://img.shields.io/badge/iOS-Shortcuts-6366f1?style=flat-square" alt="iOS 快捷指令"></a>
 </p>
 
-<p><a href="#下载">下载安装</a> · <a href="#界面预览">界面预览</a> · <a href="#开始使用">使用指南</a> · <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/issues">反馈问题</a></p>
+<p><a href="#下载">下载安装</a> · <a href="#界面预览">界面预览</a> · <a href="#开始使用">使用指南</a> · <a href="ios/shortcuts-guide.md">iOS 快捷指令</a> · <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/issues">反馈问题</a></p>
 
 </div>
 
@@ -21,6 +23,8 @@
 - **自动连接**：保存账号后自动认证，掉线、换网或唤醒后检查连接。
 - **原生运行**：桌面端驻留托盘或菜单栏，安卓端通过通知栏操作。
 - **本地保存**：密码在本机加密保存，没有广告或统计 SDK。
+- **Linux 无头版**：`snnulogin --daemon` 配 systemd 用户服务，没有图形界面，适合服务器和远程机器。
+- **iOS 快捷指令**：用系统「快捷指令」实现连上 SNNU 自动登录，不需要安装 App。
 - **在线设备管理**：托盘、菜单栏或安卓设置可直接打开校园网门户的设备列表，查看当前在线的设备；下线操作仍在门户里完成。
 
 ## 下载
@@ -38,7 +42,7 @@ Windows 可直接运行 EXE，ZIP 需先解压。Mac 首次打开请参照[安�
 
 <p align="center">
   <a href="docs/screenshots/home.png"><img src="docs/screenshots/home.png" width="278" height="360" align="top" alt="Windows 首页" title="Windows · 查看原图"></a>
-  <a href="docs/images/macos/home.png"><img src="docs/images/macos/home.png" width="290" height="360" align="top" alt="macOS 首页，模拟会话" title="macOS · 查看原图"></a>
+  <a href="docs/images/macos/home.png"><img src="docs/images/macos/home.png" width="290" height="360" align="top" alt="macOS 首页" title="macOS · 查看原图"></a>
   <a href="docs/images/android/home.png"><img src="docs/images/android/home.png" width="167" height="360" align="top" alt="Android 首页" title="Android · 查看原图"></a>
 </p>
 
@@ -52,7 +56,9 @@ Windows 可直接运行 EXE，ZIP 需先解压。Mac 首次打开请参照[安�
 
 Windows 可在设置中开启「自动连接学校 Wi-Fi」，断网后尝试连接已保存的 SNNU。Android 如需锁屏后持续重连，请检查「后台与通知」设置。
 
-使用指南：[Windows](docs/windows.md) · [macOS](docs/macos.md) · [Android](android/README.md)
+Linux 无头版用 `snnulogin --setup` 保存账号，再执行 `systemctl --user enable --now snnulogin`；iOS 按快捷指令指南配置，十分钟做完。
+
+使用指南：[Windows](docs/windows.md) · [macOS](docs/macos.md) · [Android](android/README.md) · [Linux](packaging/linux/INSTALL.md) · [iOS 快捷指令](ios/shortcuts-guide.md)
 
 ## 体积与内存
 
@@ -62,6 +68,7 @@ Windows 可在设置中开启「自动连接学校 Wi-Fi」，断网后尝试连
 | macOS · M 系列 | 1.21 MiB | 13.4 MiB |
 | macOS · Intel | 1.25 MiB | 9.7 MiB |
 | Android | 56.2 KiB | 23.9 MiB |
+| Linux · amd64 | 1.01 MiB | — |
 
 <sub>内存及 Mac 体积为既往版本的实测记录，具体版本见测量文档；本次修复未重测真机内存。各平台测量口径不同，以上并非内存上限，详见<a href="docs/performance.md">测试环境、统计口径与原始采样</a>。</sub>
 

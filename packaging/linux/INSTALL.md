@@ -72,33 +72,16 @@ WSL 默认没有 systemd 用户会话（PID 1 是 init，`systemctl --user` 会�
 | 命令 | 说明 |
 | --- | --- |
 | `snnulogin --status` | 只读状态：门户探测、认证状态、外网、后台、自启、网卡、配置路径 |
-| `snnulogin --wifi-info` | 只读：有线/Wi-Fi 现状与 nmcli 可用性 |
 | `snnulogin --logoff` | 断开认证并暂停自动登录（`--logout` 同义） |
 | `snnulogin --doctor` | 状态 + 最近日志 |
 | `snnulogin --stop` | 通知后台退出 |
 | `snnulogin --help` | 全部参数 |
 
-## 六、Wi-Fi 自愈（可选）
-
-和 Windows 端口同一套三条件门控：**外网不可用 + 门户不可达 + 没有有线在线且当前 Wi-Fi 不是目标网络**
-三条同时成立，才会把 Wi-Fi 连回学校网络（只连系统已保存的配置，不扫描、不新建配置）。
-有线判定读 `/sys/class/net`，SSID 读 `nmcli -t -f active,ssid dev wifi list`；
-**系统没有 nmcli 时整块能力自动跳过**，只记一行日志，不影响登录主流程。
-
-连接动作默认是**打桩**的：只记录一行「本应执行 nmcli dev wifi connect <SSID>」，
-不会真的切换无线。确实需要真实切换时，给守护进程加环境变量：
-
-```ini
-# ~/.config/systemd/user/snnulogin.service.d/connect.conf
-[Service]
-Environment=SNNU_ALLOW_WIFI_CONNECT=1
-```
-
-## 七、配置、日志与密码
+## 六、配置、日志与密码
 
 | 路径 | 说明 |
 | --- | --- |
-| `~/.config/snnulogin/config.json` | 账号、出口、保活与自愈设置（权限 0600） |
+| `~/.config/snnulogin/config.json` | 账号、出口与保活设置（权限 0600） |
 | `~/.config/snnulogin/state.json` | 运行状态：控制端口、上次成功时间、上次失败原因等 |
 | `~/.config/snnulogin/login.log` | 日志（超过 200 KB 轮转为 `login.log.old`） |
 

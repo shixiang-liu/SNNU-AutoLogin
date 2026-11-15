@@ -43,12 +43,26 @@ bash scripts/package-macos.sh aarch64-apple-darwin
 
 默认生成经过裁剪优化的测试包，使用独立包名与测试签名。正式签名、Linux/macOS 构建及设备测试见 [Android 开发与验证](android-development.md)。发布密钥和密码不得写入仓库。
 
+## Linux
+
+需要 Rust stable 和 `dpkg-deb`（只有打 deb 时需要）。在仓库根目录运行：
+
+```sh
+bash scripts/package-linux.sh
+```
+
+产物写入 `dist/linux/`：`snnulogin_<版本>_amd64.deb`、`snnulogin-<版本>-linux-amd64.tar.gz` 与 `SHA256SUMS`。
+版本号取自 `src/linux/mod.rs` 的 `VERSION`，与 Windows 的 Cargo 版本相互独立。CI 在 ubuntu 上跑同一脚本，
+结果见 `.github/workflows/linux.yml`。
+
 ## 代码入口
 
 | 路径 | 职责 |
 | :--- | :--- |
-| `src/` | Windows/macOS 共享的门户协议、调度与状态模型 |
+| `src/` | 三端共享的门户协议、调度与状态模型 |
 | `src/macos/` | AppKit 界面、钥匙串、菜单栏与 macOS 系统适配 |
+| `src/linux/` | Linux 无头 CLI、systemd 单元与 XDG 存储 |
+| `ios/` | iOS 快捷指令指南（不含 App 代码） |
 | `android/app/src/main/` | Android 界面、服务、网络与账号存储 |
 | `android/app/src/test/` | Android 离线回归测试 |
 | `android/app/src/androidTest/` | Android 设备检查 |

@@ -18,8 +18,6 @@
 | :---: | :---: |
 | <img src="https://raw.githubusercontent.com/shixiang-liu/SNNU-AutoLogin/main/docs/images/macos/home.png" width="300" alt="macOS 原生首页"> | <img src="https://raw.githubusercontent.com/shixiang-liu/SNNU-AutoLogin/main/docs/images/macos/settings.png" width="300" alt="macOS 设置"> |
 
-截图来自自动化验证的模拟会话，不包含真实校园网账号。
-
 ## 体积与内存
 
 | 架构 | App 体积 | 在线后台物理占用 |
