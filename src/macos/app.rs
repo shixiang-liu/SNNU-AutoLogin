@@ -1082,6 +1082,7 @@ impl Ui {
                             tray_model::Command::Disconnect => 21,
                             tray_model::Command::Retry => 20,
                             tray_model::Command::Quit => 19,
+                            tray_model::Command::Devices => 42,
                         };
                         let item = self.menu_item(label, tag);
                         let _: () = msg_send![&item, setEnabled: enabled];
@@ -1106,6 +1107,22 @@ impl Ui {
         item
     }
     unsafe fn action(&mut self, tag: isize) {
+        if tag == 42 {
+            let port = config::load_state().port;
+            if portal::PORTS.contains(&port) && portal::host() == portal::HOST {
+                let url = format!("http://{}:{port}/snnuportal/userstatus.jsp", portal::HOST);
+                if std::process::Command::new("/usr/bin/open")
+                    .arg(url)
+                    .spawn()
+                    .is_err()
+                {
+                    tray::failed("无法打开在线设备管理页面");
+                }
+            } else {
+                tray::failed("请先连接校园网");
+            }
+            return;
+        }
         if runtime::BUSY.load(Ordering::SeqCst)
             && matches!(tag, 10..=14 | 16 | 18 | 20 | 21 | 30..=32)
         {

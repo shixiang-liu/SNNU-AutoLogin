@@ -10,9 +10,9 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconGetRect, Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_REALTIME,
-    NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETFOCUS, NIM_SETVERSION,
-    NOTIFYICONDATAW, NOTIFYICONIDENTIFIER, NOTIFY_ICON_MESSAGE,
+    ShellExecuteW, Shell_NotifyIconGetRect, Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE,
+    NIF_REALTIME, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETFOCUS,
+    NIM_SETVERSION, NOTIFYICONDATAW, NOTIFYICONIDENTIFIER, NOTIFY_ICON_MESSAGE,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -389,6 +389,32 @@ fn show_menu(hwnd: HWND, quit: &Arc<AtomicBool>) {
                 }
                 quit.store(true, Ordering::SeqCst);
                 let _ = PostMessageW(hwnd, WM_DESTROY, WPARAM(0), LPARAM(0));
+            }
+            return;
+        }
+        8 => {
+            let port = crate::config::load_state().port;
+            if crate::portal::PORTS.contains(&port) && crate::portal::host() == crate::portal::HOST
+            {
+                let url = wide(&format!(
+                    "http://{}:{port}/snnuportal/userstatus.jsp",
+                    crate::portal::HOST
+                ));
+                let result = unsafe {
+                    ShellExecuteW(
+                        hwnd,
+                        windows::core::w!("open"),
+                        PCWSTR(url.as_ptr()),
+                        PCWSTR::null(),
+                        PCWSTR::null(),
+                        SW_SHOWNORMAL,
+                    )
+                };
+                if result.0 as isize <= 32 {
+                    failed("无法打开在线设备管理页面");
+                }
+            } else {
+                failed("请先连接校园网");
             }
             return;
         }

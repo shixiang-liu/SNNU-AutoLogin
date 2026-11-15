@@ -67,6 +67,7 @@ pub enum Command {
     Quit = 5,
     Automatic = 6,
     Settings = 7,
+    Devices = 8,
 }
 
 pub struct Context {
@@ -149,6 +150,13 @@ pub fn menu(c: &Context) -> Vec<Entry> {
     entries.push(action(
         Command::Disconnect,
         "断开校园网认证",
+        active && c.link == Link::Online,
+        false,
+    ));
+    // 只做跳转：设备列表与下线操作都留在门户里。
+    entries.push(action(
+        Command::Devices,
+        "在线设备管理（校园网门户）",
         active && c.link == Link::Online,
         false,
     ));
@@ -235,6 +243,19 @@ mod tests {
             assert!(action(&c, id).unwrap().0);
         }
         assert_eq!(status(&c), "正在处理…");
+    }
+    #[test]
+    fn device_management_is_only_offered_while_online() {
+        let mut c = online();
+        assert_eq!(action(&c, Command::Devices), Some((true, false)));
+        for link in [Link::Waiting, Link::Offline, Link::Connecting, Link::Setup] {
+            c.link = link;
+            assert_eq!(
+                action(&c, Command::Devices),
+                Some((false, false)),
+                "{link:?} 状态下不应允许打开设备列表"
+            );
+        }
     }
     #[test]
     fn waiting_and_restricted_accounts_have_specific_statuses() {
