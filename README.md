@@ -7,9 +7,9 @@
 <p>连上学校网络，自动登录、掉线重连。</p>
 
 <p>
-  <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/v1.1.1"><img src="https://img.shields.io/badge/Windows-v1.1.1-2563eb?style=flat-square" alt="Windows v1.1.1"></a>
-  <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/macos-v1.0.1"><img src="https://img.shields.io/badge/macOS-v1.0.1-475569?style=flat-square" alt="macOS v1.0.1"></a>
-  <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/android-v1.0.1"><img src="https://img.shields.io/badge/Android-v1.0.1-16a34a?style=flat-square" alt="Android v1.0.1"></a>
+  <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/v1.1.2"><img src="https://img.shields.io/badge/Windows-v1.1.2-2563eb?style=flat-square" alt="Windows v1.1.2"></a>
+  <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/macos-v1.0.2"><img src="https://img.shields.io/badge/macOS-v1.0.2-475569?style=flat-square" alt="macOS v1.0.2"></a>
+  <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/releases/tag/android-v1.0.2"><img src="https://img.shields.io/badge/Android-v1.0.2-16a34a?style=flat-square" alt="Android v1.0.2"></a>
 </p>
 
 <p><a href="#下载">下载安装</a> · <a href="#界面预览">界面预览</a> · <a href="#开始使用">使用指南</a> · <a href="https://github.com/shixiang-liu/SNNU-AutoLogin/issues">反馈问题</a></p>
@@ -27,9 +27,9 @@
 
 | 平台 | 下载安装 |
 | :--- | :--- |
-| **Windows**<br><sub>Windows 10 / 11 · x64</sub> | [单文件 EXE](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/v1.1.1/SNNU-AutoLogin.exe) · [免安装 ZIP](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/v1.1.1/SNNU-AutoLogin-v1.1.1-windows-x64.zip) |
-| **macOS**<br><sub>macOS 13 及以上</sub> | [M 系列芯片](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/macos-v1.0.1/SNNU-AutoLogin-v1.0.1-macos-arm64.zip) · [Intel 芯片](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/macos-v1.0.1/SNNU-AutoLogin-v1.0.1-macos-x64.zip) |
-| **Android**<br><sub>Android 8.0 及以上</sub> | [安装 APK](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/android-v1.0.1/SNNU-AutoLogin-android.apk) |
+| **Windows**<br><sub>Windows 10 / 11 · x64</sub> | [单文件 EXE](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/v1.1.2/SNNU-AutoLogin.exe) · [免安装 ZIP](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/v1.1.2/SNNU-AutoLogin-v1.1.2-windows-x64.zip) |
+| **macOS**<br><sub>macOS 13 及以上</sub> | [M 系列芯片](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/macos-v1.0.2/SNNU-AutoLogin-v1.0.2-macos-arm64.zip) · [Intel 芯片](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/macos-v1.0.2/SNNU-AutoLogin-v1.0.2-macos-x64.zip) |
+| **Android**<br><sub>Android 8.0 及以上</sub> | [安装 APK](https://github.com/shixiang-liu/SNNU-AutoLogin/releases/download/android-v1.0.2/SNNU-AutoLogin-android.apk) |
 
 Windows 可直接运行 EXE，ZIP 需先解压。Mac 首次打开请参照[安装说明](docs/macos.md#第一次使用)。[查看更新记录 →](https://github.com/shixiang-liu/SNNU-AutoLogin/releases)
 

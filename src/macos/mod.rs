@@ -6,7 +6,7 @@ pub mod storage;
 pub mod validation;
 
 /// macOS releases have their own version, independent of the Windows package.
-pub const VERSION: &str = "1.0.1";
+pub const VERSION: &str = "1.0.2";
 
 #[allow(non_snake_case)]
 pub struct LocalTime {

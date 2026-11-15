@@ -1,5 +1,7 @@
 # Android 验证记录
 
+2026-11-15，Android **1.0.2 / versionCode 9**：只新增「在线设备管理」入口（打开门户设备页，不做自动下线），未重测设备矩阵与耗电；构建、单元测试与 Lint 以 `.github/workflows/android.yml` 的结果为准。
+
 2026-11-03，Android **1.0.1 / versionCode 8**：88 项单元测试通过；Debug、Benchmark、Release Lint 均为 0 错误，保留 3 条已有警告。优化构建通过。本次补齐并发门户扫描的取消与收尾，扫描线程空闲后退出；手机端的换网、锁屏和长期耗电尚未重新验收。正式包 57,548 字节（约 56.2 KiB）；签名校验通过，证书 SHA-256 与 v1.0.0 相同：`f27041c3eadaefeec78c17e98a9d5c7c94b0750a879f502b713a26464e28add1`。已核对包名、versionName 1.0.1 与递增的 versionCode 8。
 
 以下为 v1.0.0 的历史真机、模拟器和内存测量记录，不代表本次补丁重新做过这些检查。

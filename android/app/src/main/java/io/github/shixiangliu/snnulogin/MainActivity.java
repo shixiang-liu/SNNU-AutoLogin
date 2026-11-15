@@ -30,6 +30,7 @@ import android.view.WindowInsets;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
@@ -137,7 +138,7 @@ public final class MainActivity extends Activity {
     private static String validPage(String value) {
         if ("advanced".equals(value)) return "settings";
         return "settings".equals(value) || "account".equals(value) || "network".equals(value) || "help".equals(value)
-            || "background".equals(value) ? value : "home";
+            || "background".equals(value) || "about".equals(value) ? value : "home";
     }
     private void back() { if (page.equals("home")) finish(); else show(page.equals("settings") || page.equals("account") ? "home" : "settings"); }
     private void show(String target) {
@@ -197,6 +198,7 @@ public final class MainActivity extends Activity {
             case "network": networkPage(); break;
             case "background": backgroundPage(); break;
             case "help": helpPage(); break;
+            case "about": aboutPage(); break;
             default: homePage(); break;
         }
         renderSystemSettings(); renderStatus();
@@ -208,6 +210,7 @@ public final class MainActivity extends Activity {
             case "network": return "连接诊断";
             case "background": return "后台与通知";
             case "help": return "使用帮助";
+            case "about": return "关于";
             default: return "校园网";
         }
     }
@@ -445,9 +448,33 @@ public final class MainActivity extends Activity {
         navigationRow("后台与通知", "查看通知、电池优化与开机恢复状态", () -> show("background"));
         navigationRow("网络信息", "检查网络，导出脱敏报告", () -> show("network"));
         navigationRow("使用帮助", "使用说明与常见问题", () -> show("help"));
+        navigationRow("关于", "作者、邮箱与项目主页", () -> show("about"));
         TextView footer = label("v" + BuildConfig.VERSION_NAME, 13, MUTED);
         footer.setGravity(Gravity.CENTER); footer.setPadding(0, dp(10), 0, dp(16));
         content.addView(footer);
+    }
+    private void aboutPage() {
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.drawable.ic_network);
+        LinearLayout.LayoutParams logoParams = new LinearLayout.LayoutParams(dp(72), dp(72));
+        logoParams.gravity = Gravity.CENTER_HORIZONTAL; logoParams.topMargin = dp(8); logoParams.bottomMargin = dp(12);
+        content.addView(logo, logoParams);
+        TextView appName = label("SNNU 校园网自动登录", 18, INK);
+        appName.setGravity(Gravity.CENTER); appName.setTypeface(null, Typeface.BOLD);
+        content.addView(appName);
+        section("作者");
+        paragraph("Shixiang Liu · shixiang.liu@foxmail.com");
+        section("项目主页");
+        paragraph("github.com/shixiang-liu/SNNU-AutoLogin");
+        paragraph("非学校官方工具；账号只保存在本机，不会上传。");
+        content.addView(link("查看更新", () -> openLink("https://github.com/shixiang-liu/SNNU-AutoLogin/releases")));
+    }
+    private void openLink(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (RuntimeException ex) {
+            error("无法打开浏览器");
+        }
     }
     private void backgroundPage() {
         paragraph("需要锁屏后继续自动登录时，再检查这里。");

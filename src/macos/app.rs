@@ -35,6 +35,7 @@ enum Page {
     Network,
     Features,
     Help,
+    About,
 }
 struct AccountDraft {
     account: String,
@@ -249,6 +250,7 @@ impl Ui {
             }
             Page::Network => 596. + self.info_extra,
             Page::Features => 724.,
+            Page::About => 424.,
             Page::Help => 596.,
         };
         let note_top = match self.page {
@@ -257,6 +259,7 @@ impl Ui {
             Page::Settings => 440.,
             Page::Network => 584. + self.info_extra,
             Page::Features => 712.,
+            Page::About => 412.,
             Page::Help => 528.,
         };
         if !feedback.is_empty() {
@@ -392,6 +395,7 @@ impl Ui {
             Page::Account => "账号设置",
             Page::Network => "网络信息",
             Page::Features => "功能介绍",
+            Page::About => "关于",
             Page::Help => "使用帮助",
         };
         if page != Page::Home {
@@ -519,6 +523,7 @@ impl Ui {
                 );
                 self.button(&document, 4, "功能介绍", rect(24., 328., 332., 42.));
                 self.button(&document, 3, "网络信息", rect(24., 382., 332., 42.));
+                self.button(&document, 6, "关于", rect(24., 436., 332., 42.));
             }
             Page::Account => {
                 self.password_visible = false;
@@ -709,6 +714,36 @@ impl Ui {
                     MUTED,
                     2,
                 );
+            }
+            Page::About => {
+                let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+                let icon: *mut AnyObject = msg_send![app, applicationIconImage];
+                let view: *mut AnyObject = msg_send![class!(NSImageView), alloc];
+                let view: *mut AnyObject =
+                    msg_send![view, initWithFrame: rect(154., 52., 72., 72.)];
+                let _: () = msg_send![view, setImage: icon];
+                let _: () = msg_send![&document, addSubview: view];
+                let lines = [
+                    ("SNNU 校园网自动登录", 16., 132.),
+                    ("作者：Shixiang Liu", 12., 168.),
+                    ("邮箱：shixiang.liu@foxmail.com", 12., 196.),
+                    ("项目主页", 12., 232.),
+                    ("github.com/shixiang-liu/SNNU-AutoLogin", 12., 256.),
+                    ("非学校官方工具；账号只保存在本机，不会上传", 12., 292.),
+                ];
+                for (text, size, y) in lines {
+                    self.label(
+                        &document,
+                        -1,
+                        text,
+                        rect(24., y, 332., 22.),
+                        size,
+                        size > 14.,
+                        if size > 14. { TEXT } else { MUTED },
+                        2,
+                    );
+                }
+                self.button(&document, 25, "查看更新", rect(24., 340., 332., 44.));
             }
             Page::Features => {
                 let groups = ["自动连接", "连接维护", "日常使用"];
@@ -1076,11 +1111,8 @@ impl Ui {
                         checked,
                     } => {
                         let tag = match command {
-                            tray_model::Command::Open => 0,
                             tray_model::Command::Settings => 1,
                             tray_model::Command::Automatic => 11,
-                            tray_model::Command::Disconnect => 21,
-                            tray_model::Command::Retry => 20,
                             tray_model::Command::Quit => 19,
                             tray_model::Command::Devices => 42,
                         };
@@ -1107,6 +1139,29 @@ impl Ui {
         item
     }
     unsafe fn action(&mut self, tag: isize) {
+        if tag == 25 {
+            let _ = std::process::Command::new("/usr/bin/open")
+                .arg(tray_model::RELEASES_URL)
+                .spawn();
+            return;
+        }
+        if tag == 43 {
+            let alert: Object = msg_send![class!(NSAlert), new];
+            let _: () =
+                msg_send![&alert, setMessageText: &*NSString::from_str("SNNU 校园网自动登录")];
+            let _: () =
+                msg_send![&alert, setInformativeText: &*NSString::from_str(tray_model::ABOUT)];
+            let _: *mut AnyObject =
+                msg_send![&alert, addButtonWithTitle: &*NSString::from_str("好")];
+            let _: isize = msg_send![&alert, runModal];
+            return;
+        }
+        if tag == 44 {
+            let _ = std::process::Command::new("/usr/bin/open")
+                .arg(tray_model::RELEASES_URL)
+                .spawn();
+            return;
+        }
         if tag == 42 {
             let port = config::load_state().port;
             if portal::PORTS.contains(&port) && portal::host() == portal::HOST {
@@ -1135,6 +1190,7 @@ impl Ui {
                 3 => Page::Network,
                 4 => Page::Features,
                 5 => Page::Help,
+                6 => Page::About,
                 _ => Page::Home,
             }),
             10 => {
@@ -1547,6 +1603,10 @@ impl Ui {
                     };
                     self.open(page);
                     self.screenshot(&dir.join(format!("{name}.png")));
+                    if self.tick == 6 {
+                        self.open(Page::About);
+                        self.screenshot(&dir.join("about.png"));
+                    }
                     if self.tick == 3 {
                         self.check_account_controls(&dir);
                     }

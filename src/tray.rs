@@ -286,7 +286,6 @@ unsafe fn create_menu(context: &Context) -> Option<HMENU> {
             return None;
         }
     }
-    let _ = SetMenuDefaultItem(menu, Command::Open as u32, 0);
     Some(menu)
 }
 
@@ -371,10 +370,6 @@ fn show_menu(hwnd: HWND, quit: &Arc<AtomicBool>) {
     let context = menu_context();
     let command = unsafe { track_menu(hwnd, &context, true) };
     match command {
-        1 => {
-            open_interface(false);
-            return;
-        }
         7 => {
             open_interface(true);
             return;
@@ -680,18 +675,13 @@ mod tests {
                 link: Link::Online,
             };
             let menu = create_menu(&context).unwrap();
-            assert_eq!(
-                GetMenuDefaultItem(menu, 0, GET_MENU_DEFAULT_ITEM_FLAGS(0)),
-                Command::Open as u32
-            );
+            // 菜单里不再有「打开主界面」，双击托盘图标才是打开窗口的方式
+            assert_eq!(GetMenuState(menu, 1, MF_BYCOMMAND), u32::MAX);
             assert_ne!(
                 GetMenuState(menu, Command::Automatic as u32, MF_BYCOMMAND) & MF_CHECKED.0,
                 0
             );
-            assert_eq!(
-                GetMenuState(menu, Command::Retry as u32, MF_BYCOMMAND),
-                u32::MAX
-            );
+            assert_eq!(GetMenuState(menu, 2, MF_BYCOMMAND), u32::MAX);
             DestroyMenu(menu).unwrap();
             context.busy = true;
             let menu = create_menu(&context).unwrap();

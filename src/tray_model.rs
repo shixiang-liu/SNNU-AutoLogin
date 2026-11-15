@@ -61,14 +61,21 @@ impl Link {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u32)]
 pub enum Command {
-    Open = 1,
-    Retry = 2,
-    Disconnect = 3,
     Quit = 5,
     Automatic = 6,
     Settings = 7,
     Devices = 8,
 }
+
+/// 「关于」里的固定信息：作者、联系方式与免责说明。三端共用同一份文案。
+pub const ABOUT: &str = "\
+作者：Shixiang Liu
+邮箱：shixiang.liu@foxmail.com
+项目主页：github.com/shixiang-liu/SNNU-AutoLogin
+
+非学校官方工具；账号只保存在本机，不会上传。";
+/// 打开 Releases 列表而不是 /latest：最新发布的可能是 Linux 或 Android，不是当前平台。
+pub const RELEASES_URL: &str = "https://github.com/shixiang-liu/SNNU-AutoLogin/releases";
 
 pub struct Context {
     pub configured: bool,
@@ -120,11 +127,8 @@ pub fn menu(c: &Context) -> Vec<Entry> {
         checked,
     };
     let active = c.configured && !c.busy;
-    let mut entries = vec![
+    let entries = vec![
         Entry::Status(status(c)),
-        Entry::Separator,
-        action(Command::Open, "打开主界面", true, false),
-        action(Command::Settings, "设置", true, false),
         Entry::Separator,
         action(
             Command::Automatic,
@@ -132,36 +136,18 @@ pub fn menu(c: &Context) -> Vec<Entry> {
             active,
             !c.paused && c.configured,
         ),
-    ];
-    if c.configured && !c.paused && (c.link != Link::Online || c.no_internet) {
-        entries.push(action(
-            Command::Retry,
-            if c.no_internet {
-                "检查网络"
-            } else if c.link == Link::Waiting {
-                "重新检测连接"
-            } else {
-                "立即重试"
-            },
-            active && c.link != Link::Connecting,
+        // 只做跳转：设备列表与下线操作都留在门户里。
+        action(
+            Command::Devices,
+            "在线设备管理",
+            active && c.link == Link::Online,
             false,
-        ));
-    }
-    entries.push(action(
-        Command::Disconnect,
-        "断开校园网认证",
-        active && c.link == Link::Online,
-        false,
-    ));
-    // 只做跳转：设备列表与下线操作都留在门户里。
-    entries.push(action(
-        Command::Devices,
-        "在线设备管理（校园网门户）",
-        active && c.link == Link::Online,
-        false,
-    ));
-    entries.push(Entry::Separator);
-    entries.push(action(Command::Quit, "退出程序", true, false));
+        ),
+        Entry::Separator,
+        action(Command::Settings, "设置", true, false),
+        Entry::Separator,
+        action(Command::Quit, "退出程序", true, false),
+    ];
     entries
 }
 
@@ -212,12 +198,14 @@ mod tests {
         assert_eq!(event(false, 2, WM_LBUTTONUP, 1), Event::Ignore);
     }
     #[test]
-    fn online_menu_removes_redundant_retry_and_keeps_one_automatic_control() {
+    fn menu_keeps_only_automatic_devices_settings_and_quit() {
         let c = online();
         assert_eq!(status(&c), "已连接");
-        assert_eq!(action(&c, Command::Retry), None);
         assert_eq!(action(&c, Command::Automatic), Some((true, true)));
-        assert_eq!(action(&c, Command::Disconnect), Some((true, false)));
+        assert_eq!(action(&c, Command::Devices), Some((true, false)));
+        assert_eq!(action(&c, Command::Settings), Some((true, false)));
+        assert_eq!(action(&c, Command::Quit), Some((true, false)));
+        // 断开与重试回主界面，托盘不再重复（菜单里已不存在这两个命令）
     }
     #[test]
     fn pause_and_account_setup_never_claim_network_was_disconnected() {
@@ -225,21 +213,17 @@ mod tests {
         c.paused = true;
         assert_eq!(status(&c), "自动登录已关闭");
         assert_eq!(action(&c, Command::Automatic), Some((true, false)));
-        assert_eq!(action(&c, Command::Retry), None);
         c.configured = false;
         assert_eq!(status(&c), "尚未设置账号");
         assert_eq!(action(&c, Command::Automatic), Some((false, false)));
-        assert_eq!(action(&c, Command::Disconnect), Some((false, false)));
     }
     #[test]
     fn busy_menu_prevents_repeated_actions_but_remains_navigable() {
         let mut c = online();
         c.link = Link::Offline;
         c.busy = true;
-        for id in [Command::Automatic, Command::Retry, Command::Disconnect] {
-            assert!(!action(&c, id).unwrap().0);
-        }
-        for id in [Command::Open, Command::Settings, Command::Quit] {
+        assert!(!action(&c, Command::Automatic).unwrap().0);
+        for id in [Command::Settings, Command::Quit] {
             assert!(action(&c, id).unwrap().0);
         }
         assert_eq!(status(&c), "正在处理…");
@@ -262,7 +246,6 @@ mod tests {
         let mut c = online();
         c.link = Link::Waiting;
         assert_eq!(status(&c), "等待校园网");
-        assert_eq!(action(&c, Command::Disconnect), Some((false, false)));
         c.restricted = true;
         assert_eq!(status(&c), "账号需要处理");
     }

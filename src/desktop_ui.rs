@@ -14,6 +14,7 @@ use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{SetScrollInfo, ShowScrollBar, DRAWITEMSTRUCT};
 use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, GetFocus, SetFocus};
+use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 const BG: u32 = 0x00f9f7f6;
@@ -89,6 +90,13 @@ const INFO_LABELS: [&str; 5] = ["网络名称", "当前账号", "上网方式", 
 const DIAG_HINT: i32 = 404;
 const DIAG: i32 = 402;
 const VERSION: i32 = 403;
+const ABOUT_ROW: i32 = 210;
+const ABOUT_REPO_LABEL: i32 = 405;
+const ABOUT_AUTHOR: i32 = 406;
+const ABOUT_MAIL: i32 = 407;
+const ABOUT_REPO: i32 = 408;
+const ABOUT_NOTE: i32 = 409;
+const ABOUT_UPDATE: i32 = 412;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Page {
@@ -97,6 +105,7 @@ enum Page {
     Account,
     Help,
     Features,
+    About,
 }
 #[derive(Clone, Copy, PartialEq)]
 enum Style {
@@ -216,6 +225,7 @@ fn controls() -> Vec<Control> {
             Row,
         ),
         c(HELP, Some(Settings), (24, 456, 332, 42), "网络信息", Row),
+        c(ABOUT_ROW, Some(Settings), (24, 502, 332, 28), "关于", Link),
         c(
             INTRO,
             Some(Account),
@@ -289,6 +299,48 @@ fn controls() -> Vec<Control> {
             Center,
         ),
         c(VERSION, Some(Help), (24, 552, 332, 20), "", Center),
+        c(
+            ABOUT_AUTHOR,
+            Some(About),
+            (24, 200, 332, 22),
+            "作者：Shixiang Liu",
+            Center,
+        ),
+        c(
+            ABOUT_MAIL,
+            Some(About),
+            (24, 228, 332, 22),
+            "邮箱：shixiang.liu@foxmail.com",
+            Center,
+        ),
+        c(
+            ABOUT_REPO_LABEL,
+            Some(About),
+            (24, 272, 332, 20),
+            "项目主页",
+            Center,
+        ),
+        c(
+            ABOUT_REPO,
+            Some(About),
+            (24, 296, 332, 22),
+            "github.com/shixiang-liu/SNNU-AutoLogin",
+            Center,
+        ),
+        c(
+            ABOUT_NOTE,
+            Some(About),
+            (24, 336, 332, 40),
+            "非学校官方工具\n账号只保存在本机，不会上传",
+            Center,
+        ),
+        c(
+            ABOUT_UPDATE,
+            Some(About),
+            (24, 396, 332, 44),
+            "查看更新",
+            Primary,
+        ),
     ];
     for (i, label) in INFO_LABELS.iter().enumerate() {
         let y = 208 + i as i32 * 40;
@@ -663,7 +715,7 @@ unsafe fn layout(hwnd: HWND) {
     };
     let mut height = match page {
         Page::Home => 472 + home_extra,
-        Page::Settings => 522,
+        Page::Settings => 566,
         Page::Account => {
             if configured {
                 592
@@ -673,6 +725,7 @@ unsafe fn layout(hwnd: HWND) {
         }
         Page::Help => 596 + info_extra,
         Page::Features => 724,
+        Page::About => 470,
     };
     height += account_extra;
     if !note.is_empty() {
@@ -723,6 +776,7 @@ unsafe fn layout(hwnd: HWND) {
                 Page::Settings => 514,
                 Page::Help => 584 + info_extra,
                 Page::Features => 712,
+                Page::About => 458,
             };
         }
         if page == Page::Home {
@@ -777,6 +831,7 @@ unsafe fn layout(hwnd: HWND) {
             Page::Account => "账号设置",
             Page::Help => "网络信息",
             Page::Features => "功能介绍",
+            Page::About => "关于",
             _ => "",
         },
     );
@@ -1730,6 +1785,18 @@ unsafe fn command(hwnd: HWND, id: i32) {
         CHECK_NETWORK => connect(hwnd),
         HELP => page(hwnd, Page::Help),
         FEATURES => page(hwnd, Page::Features),
+        ABOUT_ROW => page(hwnd, Page::About),
+        ABOUT_UPDATE => {
+            let url = wide(crate::tray_model::RELEASES_URL);
+            ShellExecuteW(
+                hwnd,
+                w!("open"),
+                PCWSTR(url.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            );
+        }
         DIAG => {
             let can_export = {
                 let u = ui();
@@ -2247,6 +2314,38 @@ unsafe fn paint(hwnd: HWND) {
             }
             rounded(hdc, rect(24, 316, 332, 42), s(dpi, 10), SOFT, SOFT);
         }
+        Page::About => {
+            // 应用图标就是 docs/assets 里的同一枚，Windows 资源 id 1
+            let hinst = GetModuleHandleW(None).unwrap();
+            if let Ok(icon) = LoadImageW(
+                hinst,
+                PCWSTR(1 as *const u16),
+                IMAGE_ICON,
+                s(dpi, 72),
+                s(dpi, 72),
+                LR_DEFAULTCOLOR,
+            ) {
+                let _ = DrawIconEx(
+                    hdc,
+                    s(dpi, 154),
+                    s(dpi, 76 - u.scroll),
+                    HICON(icon.0),
+                    s(dpi, 72),
+                    s(dpi, 72),
+                    0,
+                    HBRUSH::default(),
+                    DI_NORMAL,
+                );
+            }
+            draw_text(
+                hdc,
+                "SNNU 校园网自动登录",
+                rect(24, 160, 332, 26),
+                u.gfx.heading,
+                BLUE,
+                DT_CENTER | DT_SINGLELINE,
+            );
+        }
         Page::Features => {
             let pen = CreatePen(PS_SOLID, 1, COLORREF(LINE));
             let old = SelectObject(hdc, pen);
@@ -2759,6 +2858,7 @@ pub fn run_win32() -> Result<(), String> {
             Some("settings") => Page::Settings,
             Some("account") => Page::Account,
             Some("features") => Page::Features,
+            Some("about") => Page::About,
             Some("help") => Page::Help,
             _ => {
                 if snap.configured {
@@ -2779,6 +2879,7 @@ pub fn run_win32() -> Result<(), String> {
                     "features" => Page::Features,
                     "settings" => Page::Settings,
                     "account" => Page::Account,
+                    "about" => Page::About,
                     _ => Page::Home,
                 };
             }

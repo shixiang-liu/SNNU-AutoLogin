@@ -200,7 +200,7 @@ def read_png(path):
 def check_desktop_appearance(screenshots):
     """Golden design assertions from the shipped Windows UI, not Cocoa defaults."""
     expected_heights = {"home": 472, "settings": 448, "account": 592,
-                        "network": 596, "features": 724, "help": 596}
+                        "network": 596, "features": 724, "help": 596, "about": 424}
     checks = {
         "home": [(4, 4, 0xF6F7F9), (142, 140, 0xE8F4E5), (32, 338, 0xFFFFFF)],
         "settings": [(32, 84, 0xFFFFFF), (312, 203, 0x2563EB)],
@@ -208,6 +208,7 @@ def check_desktop_appearance(screenshots):
         "network": [(32, 80, 0xFFFFFF), (46, 102, 0x167A4A), (32, 200, 0xFFFFFF), (40, 440, 0x2563EB)],
         "features": [(32, 108, 0xFFFFFF), (32, 320, 0xFFFFFF), (32, 532, 0xFFFFFF)],
         "help": [(32, 80, 0xFFFFFF)],
+        "about": [],
     }
     results = {}
     frames = {
@@ -282,7 +283,7 @@ try:
             command(env, "--daemon")
             finish(process, log, 35)
             assert (screenshots / "smoke.json").exists()
-            for name in ("home", "settings", "account", "network", "features", "help"):
+            for name in ("home", "settings", "account", "network", "features", "help", "about"):
                 assert (screenshots / f"{name}.png").stat().st_size > 1000
             check_desktop_appearance(screenshots)
 
